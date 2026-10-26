@@ -830,6 +830,102 @@ describe("OpenCode project-scoped precedence and drift", () => {
   });
 });
 
+describe("OpenCode project-scoped inheritance and fallback", () => {
+  it("preserves inherited type and command when project layer only specifies disabled: true", async () => {
+    const { home, client } = await openCodeClient("rea-opencode-inherit-");
+    const projectDir = await createTestTempDirectory(
+      "rea-opencode-project-inherit-",
+    );
+    vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+
+    const alignedCommand = npxRegistrationCommand(process.platform);
+    await writeFile(
+      client.configPath,
+      JSON.stringify({
+        mcp: {
+          servers: {
+            rea: {
+              type: "local",
+              command: alignedCommand,
+              enabled: true,
+            },
+          },
+        },
+      }),
+    );
+
+    const projectConfigPath = resolve(projectDir, "opencode.json");
+    await writeFile(
+      projectConfigPath,
+      JSON.stringify({
+        mcp: {
+          servers: {
+            rea: {
+              disabled: true,
+            },
+          },
+        },
+      }),
+    );
+
+    const statuses = await readClientRegistrationStatuses(home, undefined, {
+      environment: {},
+    });
+    const status = statuses.find(({ client: c }) => c === "opencode");
+    expect(status).toMatchObject({
+      client: "opencode",
+      state: "stale",
+      scope: "project",
+      launcher_scope: "user",
+      config_path: projectConfigPath,
+      command: alignedCommand,
+    });
+    expect(status?.remediation).toContain(
+      "REA setup writes only user-level client configuration and does not modify project-scoped configuration",
+    );
+  });
+
+  it("falls back to user missing when project files only contain sibling servers", async () => {
+    const home = await createTestTempDirectory("rea-opencode-sibling-home-");
+    const projectDir = await createTestTempDirectory(
+      "rea-opencode-sibling-cwd-",
+    );
+    vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+
+    const projectConfigPath = resolve(projectDir, "opencode.json");
+    await writeFile(
+      projectConfigPath,
+      JSON.stringify({
+        mcp: {
+          servers: {
+            other: {
+              type: "local",
+              command: ["node", "other.js"],
+            },
+          },
+        },
+      }),
+    );
+
+    const statuses = await readClientRegistrationStatuses(home, undefined, {
+      environment: {},
+    });
+    const status = statuses.find(({ client: c }) => c === "opencode");
+    const client = supportedClients(home).find(
+      ({ name }) => name === "opencode",
+    );
+    expect(status).toMatchObject({
+      client: "opencode",
+      state: "missing",
+      scope: "user",
+      config_path: client?.configPath,
+    });
+    expect(status?.remediation).toContain(
+      "Run rea setup to refresh this registration",
+    );
+  });
+});
+
 describe("OpenCode project-scoped uninstall", () => {
   it("uninstalls REA-owned project registrations and preserves sibling servers and JSONC comments", async () => {
     const home = await createTestTempDirectory("rea-opencode-uninstall-home-");

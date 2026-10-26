@@ -56,6 +56,8 @@ interface ClientRegistrationStatusBase {
   readonly config_path: string;
   /** Configuration scope that produced or governs this status, when project scope is supported. */
   readonly scope?: ClientRegistrationScope;
+  /** Configuration scope that provides the launcher command, when distinct from scope. */
+  readonly launcher_scope?: ClientRegistrationScope;
   /** Exact package reference requested by npx/bunx, when registration uses one. */
   readonly package_reference?: string;
   /** Non-blocking timeout guidance; caller-selected values remain aligned. */
@@ -106,6 +108,8 @@ interface ClientRegistrationReadOptions {
    * product profile is absent.
    */
   readonly evidence?: "readiness" | "ownership";
+  /** Limit inspection to user-scoped configuration files. Defaults to inspecting project files when present. */
+  readonly scope?: "user" | "all";
   readonly resolveProviderRequestBudget?: ProviderRequestBudgetResolver;
 }
 
@@ -162,6 +166,7 @@ export const readClientRegistrationInspections = async (
     const presence = await clientEvidencePresent(client, {
       selected,
       ownership: options.evidence === "ownership",
+      ...(options.scope === undefined ? {} : { scope: options.scope }),
     });
     if (!presence.ok) {
       record({
@@ -194,6 +199,7 @@ export const readClientRegistrationInspections = async (
         client,
         options.resources,
         options.platform,
+        options.scope ?? "all",
       );
       if (!configuration.ok) {
         if (
@@ -216,7 +222,13 @@ export const readClientRegistrationInspections = async (
         });
         continue;
       }
-      const { document: parsed, configPath, scope } = configuration.value;
+      const {
+        document: parsed,
+        configPath,
+        scope,
+        launcherScope,
+        launcherConfigPath,
+      } = configuration.value;
       selectedConfigPath = configPath;
       if (scope !== undefined) selectedScope = scope;
       if (parsed === undefined) {
@@ -368,6 +380,8 @@ export const readClientRegistrationInspections = async (
                   client,
                   selectedConfigPath,
                   selectedScope,
+                  launcherScope,
+                  launcherConfigPath,
                 )
               : alignment === "unknown"
                 ? unknownEntryPointRemediation()
@@ -393,6 +407,7 @@ export const readClientRegistrationInspections = async (
             : undefined,
           selectedConfigPath,
           selectedScope,
+          launcherScope,
         ),
         activation,
         commandFacts.identity,
@@ -546,12 +561,16 @@ const configuredStatus = (
   advisory?: string,
   configPath: string = client.configPath,
   scope?: ClientRegistrationScope,
+  launcherScope?: ClientRegistrationScope,
 ): ClientRegistrationStatus =>
   state === "aligned"
     ? {
         client: client.name,
         config_path: configPath,
         ...(scope === undefined ? {} : { scope }),
+        ...(launcherScope === undefined
+          ? {}
+          : { launcher_scope: launcherScope }),
         command,
         ...(packageReference === undefined
           ? {}
@@ -564,6 +583,9 @@ const configuredStatus = (
         client: client.name,
         config_path: configPath,
         ...(scope === undefined ? {} : { scope }),
+        ...(launcherScope === undefined
+          ? {}
+          : { launcher_scope: launcherScope }),
         command,
         ...(packageReference === undefined
           ? {}
@@ -617,9 +639,11 @@ const packageVersionRemediation = (
   client: SetupClient,
   configPath?: string,
   scope?: ClientRegistrationScope,
+  launcherScope?: ClientRegistrationScope,
+  launcherConfigPath?: string,
 ): string =>
-  scope === "project"
-    ? `This project-scoped registration in ${configPath ?? client.configPath} requests ${packageReference}, while the current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}. REA setup writes only user-level configuration; update the package version in ${configPath ?? client.configPath}, then restart the client.`
+  launcherScope === "project"
+    ? `This project-scoped registration in ${launcherConfigPath ?? configPath ?? client.configPath} requests ${packageReference}, while the current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}. REA setup writes only user-level configuration; update the package version in ${launcherConfigPath ?? configPath ?? client.configPath}, then restart the client.`
     : `This registration requests ${packageReference}, while the current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}. REA does not resolve package-runner requests during doctor; update the registration with rea setup --client ${client.name}, then restart the client.`;
 
 const unavailableStatus = (
@@ -639,7 +663,11 @@ const unavailableStatus = (
 /** Product discovery follows targets; configuration evidence retains entry presence. */
 const clientEvidencePresent = async (
   client: SetupClient,
-  evidence: { readonly selected: boolean; readonly ownership: boolean },
+  evidence: {
+    readonly selected: boolean;
+    readonly ownership: boolean;
+    readonly scope?: "user" | "all";
+  },
 ): Promise<
   Result<boolean, { readonly path: string; readonly detail: string }>
 > => {
@@ -650,7 +678,7 @@ const clientEvidencePresent = async (
   const discoveryPaths = new Set(client.discoveryPaths ?? []);
   const paths = [
     ...clientEvidencePaths(client),
-    ...(client.projectConfigPaths ?? []),
+    ...(evidence.scope === "user" ? [] : (client.projectConfigPaths ?? [])),
     ...(evidence.ownership ? clientOwnershipEvidencePaths(client) : []),
   ];
   let unavailable:
