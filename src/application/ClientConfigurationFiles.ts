@@ -266,6 +266,68 @@ export const readEffectiveClientRegistrationConfiguration = async (
 ): Promise<
   Result<EffectiveClientRegistrationConfiguration, ClientConfigurationFileError>
 > => {
+  let piProjectFile:
+    | Result<
+        ClientConfigurationDocument | undefined,
+        ClientConfigurationFileError
+      >
+    | undefined;
+  if (
+    targetScope !== "user" &&
+    client.format === "pi" &&
+    client.projectConfigPaths !== undefined &&
+    client.projectConfigPaths.length > 0
+  ) {
+    const projectPath = client.projectConfigPaths[0];
+    if (projectPath !== undefined) {
+      piProjectFile = await readConfigurationFile(
+        projectPath,
+        client.format,
+        resources,
+      );
+      if (!piProjectFile.ok)
+        return err({ ...piProjectFile.error, scope: "project" });
+      if (piProjectFile.value !== undefined) {
+        const rawProjectRea = effectiveClientServer(
+          piProjectFile.value,
+          PRODUCT_IDENTITY.mcpServerKey,
+        );
+        if (
+          rawProjectRea !== undefined &&
+          !isPiPartialServerOverride(rawProjectRea)
+        ) {
+          const fragmentEnv = clientRegistrationEnvironment(
+            piProjectFile.value,
+            {},
+            "fragment",
+            platform,
+          );
+          if (!fragmentEnv.ok)
+            return err(
+              invalidEnvironment(projectPath, fragmentEnv.error, "project"),
+            );
+          const effectiveEnv = clientRegistrationEnvironment(
+            piProjectFile.value,
+            {},
+            "effective",
+            platform,
+          );
+          if (!effectiveEnv.ok)
+            return err(
+              invalidEnvironment(projectPath, effectiveEnv.error, "project"),
+            );
+          return ok({
+            document: piProjectFile.value,
+            configPath: projectPath,
+            scope: "project",
+            launcherScope: "project",
+            launcherConfigPath: projectPath,
+          });
+        }
+      }
+    }
+  }
+
   const nativeSources = await readClientConfigurationFiles(
     client,
     resources,
@@ -290,16 +352,10 @@ export const readEffectiveClientRegistrationConfiguration = async (
   ) {
     const projectPath = client.projectConfigPaths[0];
     if (projectPath !== undefined) {
-      const projectFile = await readConfigurationFile(
-        projectPath,
-        client.format,
-        resources,
-      );
-      if (!projectFile.ok)
-        return err({ ...projectFile.error, scope: "project" });
-      if (projectFile.value !== undefined) {
+      const projectDoc = piProjectFile?.ok ? piProjectFile.value : undefined;
+      if (projectDoc !== undefined) {
         const fragmentEnv = clientRegistrationEnvironment(
-          projectFile.value,
+          projectDoc,
           {},
           "fragment",
           platform,
@@ -310,7 +366,7 @@ export const readEffectiveClientRegistrationConfiguration = async (
           );
 
         const rawProjectRea = effectiveClientServer(
-          projectFile.value,
+          projectDoc,
           PRODUCT_IDENTITY.mcpServerKey,
         );
         if (rawProjectRea !== undefined) {
@@ -340,9 +396,9 @@ export const readEffectiveClientRegistrationConfiguration = async (
             launcherConfigPath = client.configPath;
           }
           const effectiveDoc: ClientConfigurationDocument = {
-            ...projectFile.value,
+            ...projectDoc,
             servers: {
-              ...projectFile.value.servers,
+              ...projectDoc.servers,
               [PRODUCT_IDENTITY.mcpServerKey]: effectiveRea,
             },
           };

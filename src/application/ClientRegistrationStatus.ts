@@ -408,6 +408,8 @@ export const readClientRegistrationInspections = async (
           selectedConfigPath,
           selectedScope,
           launcherScope,
+          launcherConfigPath,
+          alignment === "stale" && activation === "enabled",
         ),
         activation,
         commandFacts.identity,
@@ -562,8 +564,14 @@ const configuredStatus = (
   configPath: string = client.configPath,
   scope?: ClientRegistrationScope,
   launcherScope?: ClientRegistrationScope,
-): ClientRegistrationStatus =>
-  state === "aligned"
+  launcherConfigPath?: string,
+  alignmentStale = false,
+): ClientRegistrationStatus => {
+  const remediationScope = alignmentStale ? (launcherScope ?? scope) : scope;
+  const remediationPath = alignmentStale
+    ? (launcherConfigPath ?? configPath)
+    : configPath;
+  return state === "aligned"
     ? {
         client: client.name,
         config_path: configPath,
@@ -592,8 +600,10 @@ const configuredStatus = (
           : { package_reference: packageReference }),
         state,
         remediation:
-          policyRemediation ?? remediation(client, configPath, scope),
+          policyRemediation ??
+          remediation(client, remediationPath, remediationScope),
       };
+};
 
 const timeoutAdvisory = (
   client: SetupClient,

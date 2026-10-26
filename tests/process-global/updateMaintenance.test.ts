@@ -46,6 +46,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   await rm(home, { recursive: true, force: true });
 });
 

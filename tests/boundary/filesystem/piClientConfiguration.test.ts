@@ -416,6 +416,58 @@ describe("Pi project-scoped discovery and overrides", () => {
     });
   });
 
+  it("evaluates a project full replacement even when the shadowed user row has invalid REA environment", async () => {
+    const { home, client } = await piClient();
+    const projectDir = await createTestTempDirectory(
+      "rea-pi-invalid-user-env-",
+    );
+    vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+
+    await writeFile(
+      client.configPath,
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            command: "npx",
+            args: ["-y", "rea-agents@1.0.0", "mcp"],
+            env: {
+              REA_GHIDRA_STARTUP_TIMEOUT_MS: "bad",
+            },
+          },
+        },
+      }),
+    );
+
+    const projectConfigDir = join(projectDir, ".pi");
+    await mkdir(projectConfigDir, { recursive: true });
+    const projectConfigPath = resolve(projectConfigDir, "mcp.json");
+    const command = npxRegistrationCommand(process.platform);
+    await writeFile(
+      projectConfigPath,
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            command: command[0],
+            args: command.slice(1),
+          },
+        },
+      }),
+    );
+
+    const statuses = await readClientRegistrationStatuses(home, undefined, {
+      environment: {},
+    });
+    const piStatus = statuses.find(({ client: c }) => c === "pi");
+    expect(piStatus).toMatchObject({
+      client: "pi",
+      state: "aligned",
+      scope: "project",
+      config_path: projectConfigPath,
+    });
+  });
+});
+
+describe("Pi project-scoped partial overrides", () => {
   it("applies a partial project override onto a user registration and directs remediation to the project file", async () => {
     const { home, client } = await piClient();
     const projectDir = await createTestTempDirectory("rea-pi-project-cwd-");
