@@ -1,6 +1,11 @@
 import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { readClientPolicyBlock } from "./GeminiClientSettings.js";
-import { readEffectiveClientRegistrationConfiguration } from "./ClientConfigurationFiles.js";
+import {
+  readEffectiveClientRegistrationConfiguration,
+  type ClientRegistrationScope,
+} from "./ClientConfigurationFiles.js";
+
+export type { ClientRegistrationScope };
 import {
   clientServerForcedEnabled,
   clientServerListedDisabled,
@@ -49,6 +54,8 @@ import {
 interface ClientRegistrationStatusBase {
   readonly client: string;
   readonly config_path: string;
+  /** Configuration scope that produced or governs this status, when project scope is supported. */
+  readonly scope?: ClientRegistrationScope;
   /** Exact package reference requested by npx/bunx, when registration uses one. */
   readonly package_reference?: string;
   /** Non-blocking timeout guidance; caller-selected values remain aligned. */
@@ -180,6 +187,8 @@ export const readClientRegistrationInspections = async (
       continue;
     }
     let selectedConfigPath = client.configPath;
+    let selectedScope: ClientRegistrationScope | undefined =
+      client.name === "pi" || client.name === "opencode" ? "user" : undefined;
     try {
       const configuration = await readEffectiveClientRegistrationConfiguration(
         client,
@@ -195,16 +204,23 @@ export const readClientRegistrationInspections = async (
         record({
           client: client.name,
           config_path: configuration.error.path,
+          ...(configuration.error.scope === undefined
+            ? {}
+            : { scope: configuration.error.scope }),
           command: [],
           state: "invalid",
-          remediation: configuration.error.detail,
+          remediation:
+            configuration.error.scope === "project"
+              ? `${configuration.error.detail} REA setup writes only user-level configuration and does not modify project-scoped configuration at ${configuration.error.path}. Repair or remove ${configuration.error.path}, then rerun rea doctor.`
+              : configuration.error.detail,
         });
         continue;
       }
-      const { document: parsed, configPath } = configuration.value;
+      const { document: parsed, configPath, scope } = configuration.value;
       selectedConfigPath = configPath;
+      if (scope !== undefined) selectedScope = scope;
       if (parsed === undefined) {
-        record(unavailableStatus(client, "missing", configPath));
+        record(unavailableStatus(client, "missing", configPath, selectedScope));
         continue;
       }
       const policy = await readClientPolicyBlock(
@@ -222,6 +238,7 @@ export const readClientRegistrationInspections = async (
         record({
           client: client.name,
           config_path: configPath,
+          ...(selectedScope === undefined ? {} : { scope: selectedScope }),
           command: [],
           state: "invalid",
           remediation: policy.error.detail,
@@ -239,13 +256,14 @@ export const readClientRegistrationInspections = async (
           record({
             client: client.name,
             config_path: configPath,
+            ...(selectedScope === undefined ? {} : { scope: selectedScope }),
             command: [],
             state: "invalid",
             remediation: editabilityError.message,
           });
           continue;
         }
-        record(unavailableStatus(client, "missing", configPath));
+        record(unavailableStatus(client, "missing", configPath, selectedScope));
         continue;
       }
       const effectiveClient: SetupClient =
@@ -262,9 +280,13 @@ export const readClientRegistrationInspections = async (
         record({
           client: client.name,
           config_path: configPath,
+          ...(selectedScope === undefined ? {} : { scope: selectedScope }),
           command: [],
           state: "invalid",
-          remediation: `${parsedRegistration.error.message}: ${parsedRegistration.error.settings.map(({ setting, constraint }) => `${setting}: ${constraint}`).join("; ")}`,
+          remediation:
+            selectedScope === "project"
+              ? `${parsedRegistration.error.message}: ${parsedRegistration.error.settings.map(({ setting, constraint }) => `${setting}: ${constraint}`).join("; ")}. REA setup writes only user-level configuration and does not modify project-scoped configuration at ${configPath}. Update or remove the rea registration in ${configPath}, then restart the client.`
+              : `${parsedRegistration.error.message}: ${parsedRegistration.error.settings.map(({ setting, constraint }) => `${setting}: ${constraint}`).join("; ")}`,
         });
         continue;
       }
@@ -286,6 +308,7 @@ export const readClientRegistrationInspections = async (
         record({
           client: client.name,
           config_path: configPath,
+          ...(selectedScope === undefined ? {} : { scope: selectedScope }),
           command: [],
           state: "invalid",
           remediation: registrationEnvironment.error.message,
@@ -340,7 +363,12 @@ export const readClientRegistrationInspections = async (
             : undefined) ??
             policyBlock ??
             (packageVersionDrift
-              ? packageVersionRemediation(packageReference ?? "", client)
+              ? packageVersionRemediation(
+                  packageReference ?? "",
+                  client,
+                  selectedConfigPath,
+                  selectedScope,
+                )
               : alignment === "unknown"
                 ? unknownEntryPointRemediation()
                 : undefined) ??
@@ -363,6 +391,8 @@ export const readClientRegistrationInspections = async (
                 registrationEnvironment.value.timeoutInputs,
               )
             : undefined,
+          selectedConfigPath,
+          selectedScope,
         ),
         activation,
         commandFacts.identity,
@@ -378,6 +408,7 @@ export const readClientRegistrationInspections = async (
           client,
           isMissing(cause) ? "missing" : "invalid",
           selectedConfigPath,
+          selectedScope,
         ),
       );
     }
@@ -488,7 +519,15 @@ const registrationAligned = ({
 };
 
 /** A client that rewrites its file from memory must be quit before setup. */
-const remediation = (client: SetupClient): string => {
+const remediation = (
+  client: SetupClient,
+  configPath?: string,
+  scope?: ClientRegistrationScope,
+): string => {
+  if (scope === "project") {
+    const target = configPath ?? client.configPath;
+    return `REA setup writes only user-level client configuration and does not modify project-scoped configuration at ${target}. Update or remove the rea registration in ${target}, then restart the client.`;
+  }
   if (client.quitBeforeSetup !== true)
     return "Run rea setup to refresh this registration, then restart the client.";
   const name = client.displayName ?? client.name;
@@ -505,11 +544,14 @@ const configuredStatus = (
   policyRemediation?: string,
   packageReference?: string,
   advisory?: string,
+  configPath: string = client.configPath,
+  scope?: ClientRegistrationScope,
 ): ClientRegistrationStatus =>
   state === "aligned"
     ? {
         client: client.name,
-        config_path: client.configPath,
+        config_path: configPath,
+        ...(scope === undefined ? {} : { scope }),
         command,
         ...(packageReference === undefined
           ? {}
@@ -520,13 +562,15 @@ const configuredStatus = (
       }
     : {
         client: client.name,
-        config_path: client.configPath,
+        config_path: configPath,
+        ...(scope === undefined ? {} : { scope }),
         command,
         ...(packageReference === undefined
           ? {}
           : { package_reference: packageReference }),
         state,
-        remediation: policyRemediation ?? remediation(client),
+        remediation:
+          policyRemediation ?? remediation(client, configPath, scope),
       };
 
 const timeoutAdvisory = (
@@ -571,19 +615,25 @@ const timeoutAdvisory = (
 const packageVersionRemediation = (
   packageReference: string,
   client: SetupClient,
+  configPath?: string,
+  scope?: ClientRegistrationScope,
 ): string =>
-  `This registration requests ${packageReference}, while the current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}. REA does not resolve package-runner requests during doctor; update the registration with rea setup --client ${client.name}, then restart the client.`;
+  scope === "project"
+    ? `This project-scoped registration in ${configPath ?? client.configPath} requests ${packageReference}, while the current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}. REA setup writes only user-level configuration; update the package version in ${configPath ?? client.configPath}, then restart the client.`
+    : `This registration requests ${packageReference}, while the current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}. REA does not resolve package-runner requests during doctor; update the registration with rea setup --client ${client.name}, then restart the client.`;
 
 const unavailableStatus = (
   client: SetupClient,
   state: "missing" | "invalid",
   configPath: string = client.configPath,
+  scope?: ClientRegistrationScope,
 ): ClientRegistrationStatus => ({
   client: client.name,
   config_path: configPath,
+  ...(scope === undefined ? {} : { scope }),
   command: [],
   state,
-  remediation: remediation(client),
+  remediation: remediation(client, configPath, scope),
 });
 
 /** Product discovery follows targets; configuration evidence retains entry presence. */
@@ -600,6 +650,7 @@ const clientEvidencePresent = async (
   const discoveryPaths = new Set(client.discoveryPaths ?? []);
   const paths = [
     ...clientEvidencePaths(client),
+    ...(client.projectConfigPaths ?? []),
     ...(evidence.ownership ? clientOwnershipEvidencePaths(client) : []),
   ];
   let unavailable:

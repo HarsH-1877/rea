@@ -88,6 +88,7 @@ export const existingMaintenanceScope = async (
       continue;
     }
     if (
+      registration.scope === "project" ||
       activation !== "enabled" ||
       (registration.state !== "aligned" && registration.state !== "stale") ||
       commandIdentity !== "owned"

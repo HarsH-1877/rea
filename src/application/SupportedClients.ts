@@ -21,6 +21,8 @@ export interface SetupClient {
   readonly configPath: string;
   /** User configuration files in increasing precedence, including the write target. */
   readonly configPaths?: readonly string[];
+  /** Project-scoped configuration files in increasing precedence, evaluated in doctor and uninstall. */
+  readonly projectConfigPaths?: readonly string[];
   /** Read-only Gemini scopes and trust inputs; never setup write targets. */
   readonly geminiSettings?: {
     readonly systemPath: string;
@@ -116,6 +118,13 @@ interface ClientDefinitionBase {
   readonly zcodeFallbackPath?: (context: ClientPathContext) => string;
   readonly skillPath?: ClientPath;
   readonly configPaths?: (context: ClientPathContext) => readonly string[];
+  readonly projectConfigPaths?: (
+    context: ClientPathContext,
+    userPaths: {
+      readonly configPath: string;
+      readonly configPaths?: readonly string[];
+    },
+  ) => readonly string[];
   readonly geminiSettings?: (
     context: ClientPathContext,
   ) => NonNullable<SetupClient["geminiSettings"]>;
@@ -434,6 +443,63 @@ const openCodeConfigurationPaths = (
   return resolved.filter((path, index) => resolved.lastIndexOf(path) === index);
 };
 
+const pathPresentOrUnresolved = (path: string): boolean => {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (cause: unknown) {
+    return !(
+      cause instanceof Error &&
+      "code" in cause &&
+      cause.code === "ENOENT"
+    );
+  }
+};
+
+const directoryHierarchyFromRoot = (startDir: string): readonly string[] => {
+  const dirs: string[] = [];
+  let current = resolve(startDir);
+  while (true) {
+    dirs.push(current);
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return dirs.reverse();
+};
+
+/**
+ * OpenCode project configuration paths in increasing precedence: outermost
+ * ancestor down to the current working directory, checking JSON before JSONC.
+ */
+const openCodeProjectConfigurationPaths = (
+  _context: ClientPathContext,
+  userPaths: {
+    readonly configPath: string;
+    readonly configPaths?: readonly string[];
+  },
+): readonly string[] => {
+  const userSet = new Set([
+    resolve(userPaths.configPath),
+    ...(userPaths.configPaths ?? []).map((path) => resolve(path)),
+  ]);
+  const paths: string[] = [];
+  for (const dir of directoryHierarchyFromRoot(process.cwd())) {
+    const candidates = [
+      join(dir, "opencode.json"),
+      join(dir, "opencode.jsonc"),
+      join(dir, ".opencode", "opencode.json"),
+      join(dir, ".opencode", "opencode.jsonc"),
+    ];
+    for (const candidate of candidates) {
+      const resolved = resolve(candidate);
+      if (!userSet.has(resolved) && pathPresentOrUnresolved(resolved))
+        paths.push(resolved);
+    }
+  }
+  return paths.filter((path, index) => paths.lastIndexOf(path) === index);
+};
+
 const existingOpenCodeConfigPath = (context: ClientPathContext): string => {
   // The selected directory is loaded after an explicit file by OpenCode V1.
   const overrideDirectory = openCodeOverrideDirectory(context.env);
@@ -450,18 +516,7 @@ const existingOpenCodeConfigPath = (context: ClientPathContext): string => {
             join(opencodeDirectory(context), "opencode.jsonc"),
           ].map((path) => resolve(path));
   return (
-    [...candidates].reverse().find((path) => {
-      try {
-        lstatSync(path);
-        return true;
-      } catch (cause: unknown) {
-        return !(
-          cause instanceof Error &&
-          "code" in cause &&
-          cause.code === "ENOENT"
-        );
-      }
-    }) ??
+    [...candidates].reverse().find((path) => pathPresentOrUnresolved(path)) ??
     resolve(
       overrideDirectory !== undefined
         ? join(overrideDirectory, "opencode.json")
@@ -469,6 +524,18 @@ const existingOpenCodeConfigPath = (context: ClientPathContext): string => {
             join(opencodeDirectory(context), "opencode.json"),
     )
   );
+};
+
+const piProjectConfigurationPaths = (
+  _context: ClientPathContext,
+  userPaths: {
+    readonly configPath: string;
+    readonly configPaths?: readonly string[];
+  },
+): readonly string[] => {
+  const candidate = resolve(process.cwd(), ".pi", "mcp.json");
+  if (resolve(candidate) === resolve(userPaths.configPath)) return [];
+  return pathPresentOrUnresolved(candidate) ? [candidate] : [];
 };
 
 const geminiSettings = ({
@@ -584,6 +651,7 @@ export const SUPPORTED_CLIENT_DEFINITIONS = [
     displayName: "OpenCode",
     configPath: existingOpenCodeConfigPath,
     configPaths: openCodeConfigurationPaths,
+    projectConfigPaths: openCodeProjectConfigurationPaths,
     markerPath: opencodeDirectory,
     format: "opencode",
   },
@@ -678,6 +746,7 @@ export const SUPPORTED_CLIENT_DEFINITIONS = [
         piAgentDirectory(context),
         "mcp.json",
       ),
+    projectConfigPaths: piProjectConfigurationPaths,
     markerPath: piAgentDirectory,
     format: "pi",
   },
@@ -865,6 +934,20 @@ export const supportedClients = (
           configPathError: location.error.message,
         };
       const { configPath, markerPath, msixPackage } = location.value;
+      const configPaths =
+        definition.configPaths === undefined
+          ? undefined
+          : [...new Set([...definition.configPaths(context), configPath])];
+      const projectConfigPaths =
+        definition.projectConfigPaths === undefined
+          ? undefined
+          : (() => {
+              const paths = definition.projectConfigPaths(context, {
+                configPath,
+                ...(configPaths === undefined ? {} : { configPaths }),
+              });
+              return paths.length === 0 ? undefined : paths;
+            })();
       return {
         name: definition.name,
         displayName: definition.displayName,
@@ -872,13 +955,8 @@ export const supportedClients = (
         ...(definition.geminiSettings === undefined
           ? {}
           : { geminiSettings: definition.geminiSettings(context) }),
-        ...(definition.configPaths === undefined
-          ? {}
-          : {
-              configPaths: [
-                ...new Set([...definition.configPaths(context), configPath]),
-              ],
-            }),
+        ...(configPaths === undefined ? {} : { configPaths }),
+        ...(projectConfigPaths === undefined ? {} : { projectConfigPaths }),
         ...(definition.zcodeFallbackPath === undefined
           ? {}
           : { zcodeFallbackPath: definition.zcodeFallbackPath(context) }),
