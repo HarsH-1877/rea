@@ -862,7 +862,7 @@ describe("OpenCode cross-setting environment merge and launcher uninstall", () =
             rea: {
               type: "local",
               command: alignedCommand,
-              env: {
+              environment: {
                 REA_GHIDRA_PROGRAM_NAME: "sample",
               },
             },
@@ -878,8 +878,8 @@ describe("OpenCode cross-setting environment merge and launcher uninstall", () =
         mcp: {
           servers: {
             rea: {
-              env: {
-                REA_GHIDRA_PROJECT_PATH: "/custom/project/path",
+              environment: {
+                REA_GHIDRA_PROJECT_PATH: "/custom/project/sample.gpr",
               },
             },
           },
@@ -938,6 +938,42 @@ describe("OpenCode cross-setting environment merge and launcher uninstall", () =
 
     const doc = JSON.parse(await readFile(projectConfigPath, "utf8"));
     expect(doc.mcp.servers.rea).toBeUndefined();
+  });
+
+  it("reports an OpenCode standalone registration missing type as invalid in doctor", async () => {
+    const home = await createTestTempDirectory(
+      "rea-opencode-missing-type-home-",
+    );
+    const projectDir = await createTestTempDirectory(
+      "rea-opencode-missing-type-proj-",
+    );
+    vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+
+    const alignedCommand = npxRegistrationCommand(process.platform);
+    const projectConfigPath = resolve(projectDir, "opencode.json");
+    await writeFile(
+      projectConfigPath,
+      JSON.stringify({
+        mcp: {
+          servers: {
+            rea: {
+              command: alignedCommand,
+            },
+          },
+        },
+      }),
+    );
+
+    const statuses = await readClientRegistrationStatuses(home, undefined, {
+      environment: {},
+    });
+    const status = statuses.find(({ client }) => client === "opencode");
+    expect(status).toMatchObject({
+      client: "opencode",
+      state: "invalid",
+      scope: "project",
+      config_path: projectConfigPath,
+    });
   });
 });
 
