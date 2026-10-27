@@ -360,6 +360,7 @@ export const readEffectiveClientRegistrationConfiguration = async (
 ): Promise<
   Result<EffectiveClientRegistrationConfiguration, ClientConfigurationFileError>
 > => {
+  let evaluatedProjectScope: ClientRegistrationScope | undefined;
   let piProjectFile:
     | Result<
         ClientConfigurationDocument | undefined,
@@ -385,6 +386,7 @@ export const readEffectiveClientRegistrationConfiguration = async (
         if (!piProjectFile.ok)
           return err({ ...piProjectFile.error, scope: "project" });
         if (piProjectFile.value !== undefined) {
+          evaluatedProjectScope = "user";
           const rawProjectRea = effectiveClientServer(
             piProjectFile.value,
             PRODUCT_IDENTITY.mcpServerKey,
@@ -422,6 +424,15 @@ export const readEffectiveClientRegistrationConfiguration = async (
             });
           }
         }
+      } else {
+        const candidate = await readConfigurationFile(
+          projectPath,
+          client.format,
+          resources,
+        );
+        if (candidate.ok && candidate.value !== undefined) {
+          evaluatedProjectScope = "user";
+        }
       }
     }
   }
@@ -438,11 +449,7 @@ export const readEffectiveClientRegistrationConfiguration = async (
     undefined,
     !hasProjectScope,
   );
-  if (!nativeSources.ok)
-    return err({
-      ...nativeSources.error,
-      scope: nativeSources.error.scope ?? "user",
-    });
+  if (!nativeSources.ok) return err(nativeSources.error);
   const nativeDocument = effectiveClientConfiguration(
     nativeSources.value,
     undefined,
@@ -555,6 +562,10 @@ export const readEffectiveClientRegistrationConfiguration = async (
       }
     }
 
+    if (projectSources.length > 0) {
+      evaluatedProjectScope = "user";
+    }
+
     const allSources = [...nativeSources.value, ...projectSources];
     const winningProjectDoc = [...projectSources]
       .reverse()
@@ -626,9 +637,9 @@ export const readEffectiveClientRegistrationConfiguration = async (
     return ok({
       document: nativeDocument,
       configPath: client.configPath,
-      scope: "user",
-      launcherScope: "user",
-      launcherConfigPath: client.configPath,
+      ...(evaluatedProjectScope === undefined
+        ? {}
+        : { scope: evaluatedProjectScope }),
     });
 
   const fallbackClient: SetupClient = {
@@ -642,11 +653,7 @@ export const readEffectiveClientRegistrationConfiguration = async (
     resources,
     platform,
   );
-  if (!fallbackSources.ok)
-    return err({
-      ...fallbackSources.error,
-      scope: fallbackSources.error.scope ?? "user",
-    });
+  if (!fallbackSources.ok) return err(fallbackSources.error);
   const fallbackDocument = effectiveClientConfiguration(
     fallbackSources.value,
     undefined,
@@ -657,16 +664,16 @@ export const readEffectiveClientRegistrationConfiguration = async (
       ? {
           document: nativeDocument,
           configPath: client.configPath,
-          scope: "user",
-          launcherScope: "user",
-          launcherConfigPath: client.configPath,
+          ...(evaluatedProjectScope === undefined
+            ? {}
+            : { scope: evaluatedProjectScope }),
         }
       : {
           document: fallbackDocument,
           configPath: fallbackPath,
-          scope: "user",
-          launcherScope: "user",
-          launcherConfigPath: fallbackPath,
+          ...(evaluatedProjectScope === undefined
+            ? {}
+            : { scope: evaluatedProjectScope }),
         },
   );
 };

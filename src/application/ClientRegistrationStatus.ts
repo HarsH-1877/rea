@@ -192,8 +192,7 @@ export const readClientRegistrationInspections = async (
       continue;
     }
     let selectedConfigPath = client.configPath;
-    let selectedScope: ClientRegistrationScope | undefined =
-      client.name === "pi" || client.name === "opencode" ? "user" : undefined;
+    let selectedScope: ClientRegistrationScope | undefined;
     try {
       const configuration = await readEffectiveClientRegistrationConfiguration(
         client,
@@ -210,9 +209,9 @@ export const readClientRegistrationInspections = async (
         record({
           client: client.name,
           config_path: configuration.error.path,
-          ...(configuration.error.scope === undefined
-            ? {}
-            : { scope: configuration.error.scope }),
+          ...(configuration.error.scope === "project"
+            ? { scope: "project" }
+            : {}),
           command: [],
           state: "invalid",
           remediation:
@@ -577,9 +576,9 @@ const configuredStatus = (
         client: client.name,
         config_path: configPath,
         ...(scope === undefined ? {} : { scope }),
-        ...(launcherScope === undefined
-          ? {}
-          : { launcher_scope: launcherScope }),
+        ...(scope === "project" && launcherScope === "user"
+          ? { launcher_scope: "user" }
+          : {}),
         command,
         ...(packageReference === undefined
           ? {}
@@ -592,9 +591,9 @@ const configuredStatus = (
         client: client.name,
         config_path: configPath,
         ...(scope === undefined ? {} : { scope }),
-        ...(launcherScope === undefined
-          ? {}
-          : { launcher_scope: launcherScope }),
+        ...(scope === "project" && launcherScope === "user"
+          ? { launcher_scope: "user" }
+          : {}),
         command,
         ...(packageReference === undefined
           ? {}
