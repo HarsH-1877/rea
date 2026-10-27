@@ -17,10 +17,9 @@ import {
   systemUninstallHost,
 } from "../../../src/application/Uninstall.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
-import {
-  clearClientLocationEnvironment,
-  NPX_REGISTRATION_COMMAND,
-} from "../../fixtures/clientEnvironment.js";
+import { clearClientLocationEnvironment } from "../../fixtures/clientEnvironment.js";
+
+const command = npxRegistrationCommand(process.platform);
 
 beforeEach(clearClientLocationEnvironment);
 afterEach(() => vi.unstubAllEnvs());
@@ -131,6 +130,15 @@ const piClient = async () => {
   return { home, client };
 };
 
+const trustPiProject = async (home: string, projectDir: string) => {
+  const agentDir = join(home, ".pi", "agent");
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(
+    join(agentDir, "trust.json"),
+    JSON.stringify({ [resolve(projectDir)]: true }),
+  );
+};
+
 describe("Pi registration semantics", () => {
   it("preserves unrelated content and OMP-only lists during setup, repeat, and uninstall", async () => {
     const { home, client } = await piClient();
@@ -143,7 +151,7 @@ describe("Pi registration semantics", () => {
 }\n`;
     await writeFile(client.configPath, original);
     expect(
-      await configureClientConfiguration(client, {}, NPX_REGISTRATION_COMMAND),
+      await configureClientConfiguration(client, {}, command),
     ).toMatchObject({ status: "configured" });
     expect(await readFile(`${client.configPath}.rea.backup`, "utf8")).toBe(
       original,
@@ -155,16 +163,16 @@ describe("Pi registration semantics", () => {
         other: { command: "other-server" },
         rea: {
           type: "stdio",
-          command: "npx",
-          args: NPX_REGISTRATION_COMMAND.slice(1),
+          command: command[0],
+          args: command.slice(1),
         },
       },
       enabledServers: ["other"],
       disabledServers: ["rea", "other"],
     });
-    expect(
-      await configureClientConfiguration(client, {}, NPX_REGISTRATION_COMMAND),
-    ).toEqual({ status: "unchanged" });
+    expect(await configureClientConfiguration(client, {}, command)).toEqual({
+      status: "unchanged",
+    });
     expect(await readFile(client.configPath, "utf8")).toBe(configured);
     expect(
       (
@@ -201,8 +209,8 @@ describe("Pi registration semantics", () => {
         JSON.stringify({
           mcpServers: {
             rea: {
-              command: "npx",
-              args: NPX_REGISTRATION_COMMAND.slice(1),
+              command: command[0],
+              args: command.slice(1),
               type,
               enabled,
             },
@@ -244,15 +252,12 @@ describe("Pi strict JSON parsing", () => {
       await writeFile(client.configPath, original);
       expect(() => parseClientConfiguration(original, "pi")).toThrow();
       expect(
-        await inspectClientConfiguration(client, {}, NPX_REGISTRATION_COMMAND),
+        await inspectClientConfiguration(client, {}, command),
       ).toMatchObject({ status: "invalid" });
-      expect(
-        await configureClientConfiguration(
-          client,
-          {},
-          NPX_REGISTRATION_COMMAND,
-        ),
-      ).toEqual({ status: "failed", reason: "readback" });
+      expect(await configureClientConfiguration(client, {}, command)).toEqual({
+        status: "failed",
+        reason: "readback",
+      });
       expect(await readFile(client.configPath, "utf8")).toBe(original);
       await expect(
         readFile(`${client.configPath}.rea.backup`),
@@ -283,11 +288,11 @@ describe("Pi strict JSON parsing", () => {
     await expect(readFile(client.configPath)).rejects.toMatchObject({
       code: "ENOENT",
     });
+    expect(await inspectClientConfiguration(client, {}, command)).toEqual({
+      status: "create",
+    });
     expect(
-      await inspectClientConfiguration(client, {}, NPX_REGISTRATION_COMMAND),
-    ).toEqual({ status: "create" });
-    expect(
-      await configureClientConfiguration(client, {}, NPX_REGISTRATION_COMMAND),
+      await configureClientConfiguration(client, {}, command),
     ).toMatchObject({ status: "configured" });
     const created = await readFile(client.configPath, "utf8");
     expect(() => JSON.parse(created)).not.toThrow();
@@ -295,17 +300,17 @@ describe("Pi strict JSON parsing", () => {
       mcpServers: {
         rea: {
           type: "stdio",
-          command: "npx",
-          args: NPX_REGISTRATION_COMMAND.slice(1),
+          command: command[0],
+          args: command.slice(1),
         },
       },
     });
     await expect(
       readFile(`${client.configPath}.rea.backup`),
     ).rejects.toMatchObject({ code: "ENOENT" });
-    expect(
-      await configureClientConfiguration(client, {}, NPX_REGISTRATION_COMMAND),
-    ).toEqual({ status: "unchanged" });
+    expect(await configureClientConfiguration(client, {}, command)).toEqual({
+      status: "unchanged",
+    });
     expect(await readFile(client.configPath, "utf8")).toBe(created);
     expect(
       (
@@ -341,6 +346,7 @@ describe("Pi project-scoped discovery and overrides", () => {
     const home = await createTestTempDirectory("rea-pi-project-home-");
     const projectDir = await createTestTempDirectory("rea-pi-project-cwd-");
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+    await trustPiProject(home, projectDir);
 
     const projectConfigDir = join(projectDir, ".pi");
     await mkdir(projectConfigDir, { recursive: true });
@@ -375,6 +381,7 @@ describe("Pi project-scoped discovery and overrides", () => {
     const { home, client } = await piClient();
     const projectDir = await createTestTempDirectory("rea-pi-project-cwd-");
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+    await trustPiProject(home, projectDir);
 
     await writeFile(
       client.configPath,
@@ -422,6 +429,7 @@ describe("Pi project-scoped discovery and overrides", () => {
       "rea-pi-invalid-user-env-",
     );
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+    await trustPiProject(home, projectDir);
 
     await writeFile(
       client.configPath,
@@ -472,6 +480,7 @@ describe("Pi project-scoped partial overrides", () => {
     const { home, client } = await piClient();
     const projectDir = await createTestTempDirectory("rea-pi-project-cwd-");
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+    await trustPiProject(home, projectDir);
 
     const command = npxRegistrationCommand(process.platform);
     await writeFile(
@@ -520,6 +529,7 @@ describe("Pi project-scoped partial overrides", () => {
     const home = await createTestTempDirectory("rea-pi-project-home-");
     const projectDir = await createTestTempDirectory("rea-pi-project-cwd-");
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+    await trustPiProject(home, projectDir);
 
     const projectConfigDir = join(projectDir, ".pi");
     await mkdir(projectConfigDir, { recursive: true });
@@ -556,6 +566,7 @@ describe("Pi project-scoped launcher provenance and fallback", () => {
     const { home, client } = await piClient();
     const projectDir = await createTestTempDirectory("rea-pi-stale-user-");
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+    await trustPiProject(home, projectDir);
 
     const alignedCommand = npxRegistrationCommand(process.platform);
     const staleCommand = [
@@ -611,6 +622,7 @@ describe("Pi project-scoped launcher provenance and fallback", () => {
       "rea-pi-sibling-only-cwd-",
     );
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+    await trustPiProject(home, projectDir);
 
     const projectConfigDir = join(projectDir, ".pi");
     await mkdir(projectConfigDir, { recursive: true });
@@ -646,6 +658,7 @@ describe("Pi project-scoped uninstall", () => {
     const { home } = await piClient();
     const projectDir = await createTestTempDirectory("rea-pi-project-cwd-");
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+    await trustPiProject(home, projectDir);
 
     const projectConfigDir = join(projectDir, ".pi");
     await mkdir(projectConfigDir, { recursive: true });
@@ -710,6 +723,67 @@ describe("Pi project-scoped uninstall", () => {
       name: "pi",
       status: "retained",
       detail: expect.stringContaining("not REA-owned"),
+    });
+  });
+});
+
+describe("Pi project trust enforcement", () => {
+  it("does not select project configuration when Pi project trust is untrusted or unknown", async () => {
+    const { home, client } = await piClient();
+    const projectDir = await createTestTempDirectory("rea-pi-untrusted-");
+    vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+
+    const alignedCommand = npxRegistrationCommand(process.platform);
+    await writeFile(
+      client.configPath,
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            command: alignedCommand[0],
+            args: alignedCommand.slice(1),
+          },
+        },
+      }),
+    );
+
+    const projectConfigDir = join(projectDir, ".pi");
+    await mkdir(projectConfigDir, { recursive: true });
+    await writeFile(
+      resolve(projectConfigDir, "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            enabled: false,
+          },
+        },
+      }),
+    );
+
+    // Without trust decision in trust.json or settings.json, project is untrusted
+    const statuses = await readClientRegistrationStatuses(home, undefined, {
+      environment: {},
+    });
+    const piStatus = statuses.find(({ client: c }) => c === "pi");
+    expect(piStatus).toMatchObject({
+      client: "pi",
+      state: "aligned",
+      scope: "user",
+      config_path: client.configPath,
+    });
+
+    // Now trust the project and verify project configuration is selected
+    await trustPiProject(home, projectDir);
+    const trustedStatuses = await readClientRegistrationStatuses(
+      home,
+      undefined,
+      { environment: {} },
+    );
+    const trustedPiStatus = trustedStatuses.find(({ client: c }) => c === "pi");
+    expect(trustedPiStatus).toMatchObject({
+      client: "pi",
+      state: "stale",
+      scope: "project",
+      config_path: resolve(projectConfigDir, "mcp.json"),
     });
   });
 });

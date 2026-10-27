@@ -1,6 +1,7 @@
-import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
-import { lstatSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
+import { stripComments } from "jsonc-parser";
 import { err, ok, type Result } from "../domain/result.js";
 import {
   HermesClientPathError,
@@ -374,7 +375,7 @@ const piAgentDirectory = ({
   platform,
   env,
 }: ClientPathContext): string => {
-  const paths = platform === "win32" ? win32 : { join };
+  const paths = platform === "win32" ? win32 : posix;
   let directory = env.PI_CODING_AGENT_DIR;
   if (!directory) return paths.join(home, ".pi", "agent");
   if (
@@ -456,11 +457,25 @@ const pathPresentOrUnresolved = (path: string): boolean => {
   }
 };
 
-const directoryHierarchyFromRoot = (startDir: string): readonly string[] => {
-  const dirs: string[] = [];
+const openCodeWorktreeBoundary = (startDir: string): string => {
   let current = resolve(startDir);
   while (true) {
+    if (pathPresentOrUnresolved(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return resolve(startDir);
+};
+
+const openCodeDirectoryHierarchy = (startDir: string): readonly string[] => {
+  const resolvedStart = resolve(startDir);
+  const boundary = openCodeWorktreeBoundary(resolvedStart);
+  const dirs: string[] = [];
+  let current = resolvedStart;
+  while (true) {
     dirs.push(current);
+    if (current === boundary) break;
     const parent = dirname(current);
     if (parent === current) break;
     current = parent;
@@ -484,7 +499,7 @@ const openCodeProjectConfigurationPaths = (
     ...(userPaths.configPaths ?? []).map((path) => resolve(path)),
   ]);
   const paths: string[] = [];
-  for (const dir of directoryHierarchyFromRoot(process.cwd())) {
+  for (const dir of openCodeDirectoryHierarchy(process.cwd())) {
     const candidates = [
       join(dir, "opencode.json"),
       join(dir, "opencode.jsonc"),
@@ -526,8 +541,69 @@ const existingOpenCodeConfigPath = (context: ClientPathContext): string => {
   );
 };
 
+const isPiProjectTrusted = (
+  context: ClientPathContext,
+  projectDir: string,
+): boolean => {
+  if (context.env.PI_APPROVE === "true") return true;
+  if (context.env.PI_APPROVE === "false") return false;
+  if (context.env.PI_DEFAULT_PROJECT_TRUST === "always") return true;
+  if (context.env.PI_DEFAULT_PROJECT_TRUST === "never") return false;
+
+  const agentDir = piAgentDirectory(context);
+  const trustFile = join(agentDir, "trust.json");
+  if (pathPresentOrUnresolved(trustFile)) {
+    try {
+      const text = readFileSync(trustFile, "utf8");
+      const parsed = JSON.parse(stripComments(text));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const resolvedProject = resolve(projectDir);
+        let current = resolvedProject;
+        while (true) {
+          for (const [key, val] of Object.entries(
+            parsed as Record<string, unknown>,
+          )) {
+            const resolvedKey = resolve(key);
+            const matches =
+              context.platform === "win32" || context.platform === "darwin"
+                ? resolvedKey.toLowerCase() === current.toLowerCase()
+                : resolvedKey === current;
+            if (matches) {
+              if (val === true) return true;
+              if (val === false) return false;
+            }
+          }
+          const parent = dirname(current);
+          if (parent === current) break;
+          current = parent;
+        }
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  const settingsFile = join(agentDir, "settings.json");
+  if (pathPresentOrUnresolved(settingsFile)) {
+    try {
+      const text = readFileSync(settingsFile, "utf8");
+      const parsed = JSON.parse(stripComments(text));
+      if (parsed && typeof parsed === "object") {
+        const defaultTrust = (parsed as Record<string, unknown>)
+          .defaultProjectTrust;
+        if (defaultTrust === "always") return true;
+        if (defaultTrust === "never") return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+};
+
 const piProjectConfigurationPaths = (
-  _context: ClientPathContext,
+  context: ClientPathContext,
   userPaths: {
     readonly configPath: string;
     readonly configPaths?: readonly string[];
@@ -535,7 +611,9 @@ const piProjectConfigurationPaths = (
 ): readonly string[] => {
   const candidate = resolve(process.cwd(), ".pi", "mcp.json");
   if (resolve(candidate) === resolve(userPaths.configPath)) return [];
-  return pathPresentOrUnresolved(candidate) ? [candidate] : [];
+  if (!pathPresentOrUnresolved(candidate)) return [];
+  if (!isPiProjectTrusted(context, process.cwd())) return [];
+  return [candidate];
 };
 
 const geminiSettings = ({

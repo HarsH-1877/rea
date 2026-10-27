@@ -14,12 +14,14 @@ import { configureClientConfiguration } from "../../../src/application/SetupClie
 import { systemUninstallHost } from "../../../src/application/Uninstall.js";
 import { supportedClients } from "../../../src/application/SupportedClients.js";
 import { PRODUCT_IDENTITY } from "../../../src/identity.js";
-import { classifyClientRegistrationCommand } from "../../../src/application/ClientRegistrationIdentity.js";
+import {
+  classifyClientRegistrationCommand,
+  npxRegistrationCommand,
+} from "../../../src/application/ClientRegistrationIdentity.js";
 import {
   CURRENT_ENTRYPOINT_PATH,
   normalizeEntrypointPath,
 } from "../../../src/process/CurrentEntrypointPath.js";
-import { npxRegistrationCommand } from "../../../src/application/ClientRegistrationIdentity.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import {
   clearClientLocationEnvironment,
@@ -975,6 +977,52 @@ describe("OpenCode project-scoped inheritance and fallback", () => {
       "Run rea setup to refresh this registration",
     );
     expect(status?.remediation).not.toContain(projectConfigPath);
+  });
+});
+
+describe("OpenCode Git worktree boundary", () => {
+  it("stops OpenCode project discovery at the Git worktree boundary", async () => {
+    const { home } = await openCodeClient("rea-opencode-worktree-");
+    const parentDir = await createTestTempDirectory("rea-opencode-parent-");
+    const worktreeDir = join(parentDir, "worktree");
+    const subDir = join(worktreeDir, "packages", "app");
+    await mkdir(subDir, { recursive: true });
+
+    // .git file marks worktree root
+    await writeFile(join(worktreeDir, ".git"), "gitdir: /fake/git/dir\n");
+    vi.spyOn(process, "cwd").mockReturnValue(subDir);
+
+    // Place opencode.json above worktree boundary and within worktree
+    await writeFile(
+      join(parentDir, "opencode.json"),
+      JSON.stringify({
+        mcp: { servers: { outside: { type: "local", command: ["echo"] } } },
+      }),
+    );
+    const insideConfig = join(worktreeDir, "opencode.json");
+    const alignedCommand = npxRegistrationCommand(process.platform);
+    await writeFile(
+      insideConfig,
+      JSON.stringify({
+        mcp: {
+          servers: {
+            rea: {
+              type: "local",
+              command: alignedCommand,
+              enabled: true,
+            },
+          },
+        },
+      }),
+    );
+
+    const client = supportedClients(home).find(
+      ({ name }) => name === "opencode",
+    );
+    expect(client?.projectConfigPaths).toEqual([resolve(insideConfig)]);
+    expect(client?.projectConfigPaths).not.toContain(
+      resolve(parentDir, "opencode.json"),
+    );
   });
 });
 
