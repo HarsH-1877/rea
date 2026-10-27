@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -55,7 +55,7 @@ describe("Pi user configuration paths", () => {
         PI_CONFIG_DIR: ".omp-other",
       });
       expect(client?.markerPath).toBe(expected);
-      expect(client?.configPath).toBe(join(expected, "mcp.json"));
+      expect(client?.configPath).toBe(posix.join(expected, "mcp.json"));
     },
   );
 

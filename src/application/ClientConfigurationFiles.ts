@@ -101,6 +101,7 @@ export const readClientConfigurationFiles = async (
   resources?: ArtifactResourceScope,
   platform: NodeJS.Platform = process.platform,
   writeOverrides?: Readonly<Record<string, string>>,
+  effectiveValidation: boolean = true,
 ): Promise<
   Result<readonly ClientConfigurationSource[], ClientConfigurationFileError>
 > => {
@@ -124,14 +125,16 @@ export const readClientConfigurationFiles = async (
       documents.push({ ...document.value, sourcePath: path });
     }
   }
-  const environment = clientRegistrationEnvironment(
-    effectiveClientConfiguration(documents, undefined, platform),
-    writeOverrides,
-    "effective",
-    platform,
-  );
-  if (!environment.ok)
-    return err(invalidEnvironment(client.configPath, environment.error));
+  if (effectiveValidation) {
+    const environment = clientRegistrationEnvironment(
+      effectiveClientConfiguration(documents, undefined, platform),
+      writeOverrides,
+      "effective",
+      platform,
+    );
+    if (!environment.ok)
+      return err(invalidEnvironment(client.configPath, environment.error));
+  }
   return ok(documents);
 };
 
@@ -423,10 +426,17 @@ export const readEffectiveClientRegistrationConfiguration = async (
     }
   }
 
+  const hasProjectScope =
+    targetScope !== "user" &&
+    client.projectConfigPaths !== undefined &&
+    client.projectConfigPaths.length > 0;
+
   const nativeSources = await readClientConfigurationFiles(
     client,
     resources,
     platform,
+    undefined,
+    !hasProjectScope,
   );
   if (!nativeSources.ok)
     return err({
@@ -593,6 +603,17 @@ export const readEffectiveClientRegistrationConfiguration = async (
         });
       }
     }
+  }
+
+  if (hasProjectScope && nativeDocument !== undefined) {
+    const userEnv = clientRegistrationEnvironment(
+      nativeDocument,
+      {},
+      "effective",
+      platform,
+    );
+    if (!userEnv.ok)
+      return err(invalidEnvironment(client.configPath, userEnv.error, "user"));
   }
 
   const fallbackPath =

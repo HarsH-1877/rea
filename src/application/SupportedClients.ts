@@ -784,7 +784,10 @@ export const SUPPORTED_CLIENT_DEFINITIONS = [
     name: "pi",
     displayName: "Pi",
     configPath: (context: ClientPathContext) =>
-      join(piAgentDirectory(context), "mcp.json"),
+      (context.platform === "win32" ? win32 : posix).join(
+        piAgentDirectory(context),
+        "mcp.json",
+      ),
     projectConfigPaths: piProjectConfigurationPaths,
     piSettings,
     markerPath: piAgentDirectory,

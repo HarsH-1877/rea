@@ -36,15 +36,23 @@ const launcherSchema = z
   .passthrough();
 const opencodeLauncherSchema = z
   .object({
-    type: z.literal("local"),
-    command: z.array(z.string()).min(1),
+    type: z.literal("local").optional(),
+    command: z.union([z.array(z.string()).min(1), z.string().min(1)]),
+    args: z.array(z.string()).optional(),
   })
   .passthrough();
 const normalizeOpencodeLauncher = (
   entry: z.output<typeof opencodeLauncherSchema>,
 ): z.output<typeof launcherSchema> => {
-  const [command = "", ...args] = entry.command;
-  return { ...entry, command, args };
+  if (Array.isArray(entry.command)) {
+    const [command = "", ...args] = entry.command;
+    return {
+      ...entry,
+      command,
+      args: entry.args !== undefined ? [...args, ...entry.args] : args,
+    };
+  }
+  return { ...entry, command: entry.command, args: entry.args ?? [] };
 };
 
 const registrationSchema = launcherSchema.extend({
