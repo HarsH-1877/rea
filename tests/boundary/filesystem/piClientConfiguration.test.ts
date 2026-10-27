@@ -781,6 +781,69 @@ describe("Pi project-scoped uninstall", () => {
       detail: expect.stringContaining("not REA-owned"),
     });
   });
+
+  it("refuses to remove an owned project registration when user configuration defines an unowned rea server", async () => {
+    const { home, client } = await piClient();
+    const projectDir = await createTestTempDirectory("rea-pi-hidden-foreign-");
+    vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+    await trustPiProject(home, projectDir);
+
+    // User configuration has a foreign/unowned rea server
+    await writeFile(
+      client.configPath,
+      JSON.stringify({
+        mcpServers: {
+          rea: { command: "foreign-pi-server", args: [] },
+        },
+      }),
+    );
+
+    // Project configuration has an owned rea server
+    const projectConfigDir = join(projectDir, ".pi");
+    await mkdir(projectConfigDir, { recursive: true });
+    const projectConfigPath = resolve(projectConfigDir, "mcp.json");
+    const command = npxRegistrationCommand(process.platform);
+    await writeFile(
+      projectConfigPath,
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            command: command[0],
+            args: command.slice(1),
+          },
+        },
+      }),
+    );
+
+    const host = systemUninstallHost(home);
+    const clients = await host.clients();
+    const projectClient = clients.find(
+      (c) => c.name === "pi" && c.configPath === projectConfigPath,
+    );
+    if (projectClient === undefined) throw new Error("missing project client");
+
+    // Inspect preflight fails
+    const preflight = await host.inspectClient(projectClient);
+    expect(preflight).toMatchObject({
+      status: "failed",
+      detail: expect.stringContaining("not REA-owned"),
+    });
+
+    // Remove client refuses
+    const result = await host.removeClient(projectClient);
+    expect(result).toMatchObject({
+      name: "pi",
+      status: "failed",
+      detail: expect.stringContaining("not REA-owned"),
+    });
+
+    // Project file is unchanged and no backup is created
+    const contentAfter = JSON.parse(await readFile(projectConfigPath, "utf8"));
+    expect(contentAfter.mcpServers?.rea).toBeDefined();
+    await expect(
+      readFile(`${projectConfigPath}.rea.backup`, "utf8"),
+    ).rejects.toThrow();
+  });
 });
 
 describe("Pi project trust enforcement", () => {

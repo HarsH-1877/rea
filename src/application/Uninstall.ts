@@ -512,6 +512,7 @@ export const systemUninstallHost = (
           clients.push({
             ...client,
             configPath: path.owner.configPath,
+            configPaths: client.configPaths ?? [client.configPath],
             ...(path.owner.fallback
               ? { format: "zcode_fallback" as const }
               : {}),
