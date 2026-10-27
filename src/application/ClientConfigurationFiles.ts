@@ -430,7 +430,11 @@ export const readEffectiveClientRegistrationConfiguration = async (
           client.format,
           resources,
         );
-        if (candidate.ok && candidate.value !== undefined) {
+        if (!candidate.ok) {
+          if (candidate.error.cleanupFailure !== undefined) {
+            return err({ ...candidate.error, scope: "project" });
+          }
+        } else if (candidate.value !== undefined) {
           evaluatedProjectScope = "user";
         }
       }

@@ -1255,6 +1255,80 @@ describe("OpenCode project-scoped uninstall", () => {
   });
 });
 
+describe("OpenCode project-scoped uninstall shared settings", () => {
+  it("removes an owned project registration when a lower-precedence configuration defines settings without a launcher", async () => {
+    const { home, client } = await openCodeClient(
+      "rea-opencode-settings-only-",
+    );
+    const projectDir = await createTestTempDirectory(
+      "rea-opencode-settings-cwd-",
+    );
+    vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+
+    // Lower-precedence user file has only settings (type, environment) and no launcher
+    await writeFile(
+      client.configPath,
+      JSON.stringify({
+        mcp: {
+          servers: {
+            rea: {
+              type: "local",
+              environment: {
+                SHARED_KEY: "shared_val",
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    // Higher-precedence project file has an owned rea launcher
+    const projectConfigPath = resolve(projectDir, "opencode.json");
+    const alignedCommand = npxRegistrationCommand(process.platform);
+    await writeFile(
+      projectConfigPath,
+      JSON.stringify({
+        mcp: {
+          servers: {
+            rea: {
+              type: "local",
+              command: alignedCommand,
+            },
+          },
+        },
+      }),
+    );
+
+    const host = systemUninstallHost(home);
+    const clients = await host.clients();
+    const projectClient = clients.find(
+      (c) => c.name === "opencode" && c.configPath === projectConfigPath,
+    );
+    if (projectClient === undefined) throw new Error("missing project client");
+
+    // Inspect preflight passes
+    const preflight = await host.inspectClient(projectClient);
+    expect(preflight).toBeUndefined();
+
+    // Remove client succeeds
+    const result = await host.removeClient(projectClient);
+    expect(result).toMatchObject({
+      name: "opencode",
+      status: "removed",
+    });
+
+    // Project file had its rea registration removed
+    const contentAfter = JSON.parse(await readFile(projectConfigPath, "utf8"));
+    expect(contentAfter.mcp?.servers?.rea).toBeUndefined();
+
+    // User file remains untouched with its settings
+    const userAfter = JSON.parse(await readFile(client.configPath, "utf8"));
+    expect(userAfter.mcp?.servers?.rea?.environment?.SHARED_KEY).toBe(
+      "shared_val",
+    );
+  });
+});
+
 describe("OpenCode project-scoped uninstall ownership boundaries", () => {
   it("refuses to remove an owned project registration when a lower-precedence configuration defines an unowned rea server", async () => {
     const { home, client } = await openCodeClient(
