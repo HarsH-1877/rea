@@ -707,8 +707,8 @@ JSONC exist. The ordinary XDG global configuration still participates when a
 custom directory is selected. OpenCode also discovers project configuration
 files from ancestor directories down to the current working directory
 (`opencode.json`, `opencode.jsonc`, `.opencode/opencode.json`,
-`.opencode/opencode.jsonc`), where higher-precedence project entries replace
-lower-layer server definitions. Doctor checks effective user and project
+`.opencode/opencode.jsonc`), where higher-precedence project entries override
+individual fields while inheriting omitted fields. Doctor checks effective user and project
 registrations and reports their scope; uninstall removes REA-owned entries from
 applicable user files and discovered project configuration files. Malformed
 applicable files block setup and diagnostics before changes.

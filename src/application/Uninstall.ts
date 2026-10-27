@@ -546,6 +546,12 @@ export const systemUninstallHost = (
           removal.value.legacyPath === undefined
         )
           return undefined;
+        const unownedFallback = await unownedLowerLayerFallback(
+          client,
+          fileSystem,
+        );
+        if (unownedFallback !== undefined)
+          return item(client.name, "failed", unownedFallback);
         preflightOwnedClients.add(client);
         // A removal the running package would revert, or redirect into its
         // private storage, would leave the registration in place.
@@ -827,6 +833,37 @@ const SHADOWED_UNOWNED_MEMBER_DETAIL = `Configuration repeats the "${PRODUCT_IDE
 
 const UNOWNED_LEGACY_FALLBACK_DETAIL = `OpenCode falls back to the V1 "mcp.${PRODUCT_IDENTITY.mcpServerKey}" entry, which is not REA-owned; removing REA's native registration would activate it, so no change was made. Remove or replace that V1 entry manually, then rerun uninstall.`;
 
+const unownedLowerLayerFallback = async (
+  client: SetupClient,
+  fileSystem: UninstallFileSystem,
+): Promise<string | undefined> => {
+  const allPaths = uninstallConfigPaths(client);
+  const currentIndex = allPaths.indexOf(client.configPath);
+  if (currentIndex <= 0) return undefined;
+  const lowerPaths = allPaths.slice(0, currentIndex);
+  for (const lowerPath of lowerPaths) {
+    let text: string;
+    try {
+      text = await fileSystem.readText(lowerPath);
+    } catch {
+      continue;
+    }
+    try {
+      const parsed = parseClientConfiguration(text, client.format);
+      const name = PRODUCT_IDENTITY.mcpServerKey;
+      const lowerServer = parsed.servers[name] ?? parsed.legacyServers[name];
+      if (lowerServer !== undefined) {
+        if (clientRegistrationOwnership(lowerServer, client) !== "owned") {
+          return `A lower-precedence configuration in ${lowerPath} defines a "${name}" registration that is not REA-owned; removing this registration would activate it, so no change was made. Remove or replace that registration manually, then rerun uninstall.`;
+        }
+      }
+    } catch {
+      // Unreadable or malformed lower-layer configuration is handled by its own inspection
+    }
+  }
+  return undefined;
+};
+
 /** Preserve the bytes uninstall is about to edit and return the backup holding them. */
 const backupClientConfiguration = async (
   client: SetupClient,
@@ -896,6 +933,9 @@ const removeClient = async (
       "retained",
       "The rea-named registration is not REA-owned.",
     );
+  const unownedFallback = await unownedLowerLayerFallback(client, fileSystem);
+  if (unownedFallback !== undefined)
+    return item(client.name, "failed", unownedFallback);
   const blocker = writeBlocker?.();
   if (blocker !== undefined) return item(client.name, "failed", blocker);
   const remaining = { ...parsed.servers };

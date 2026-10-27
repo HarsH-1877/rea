@@ -61,7 +61,7 @@ const normalizeOwnershipOpencodeLauncher = (
     return {
       ...entry,
       command,
-      args: entry.args !== undefined ? [...args, ...entry.args] : args,
+      args,
     };
   }
   return { ...entry, command: entry.command, args: entry.args ?? [] };
