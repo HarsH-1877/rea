@@ -382,6 +382,7 @@ export const readClientRegistrationInspections = async (
                   selectedScope,
                   launcherScope,
                   launcherConfigPath,
+                  activation,
                 )
               : alignment === "unknown"
                 ? unknownEntryPointRemediation()
@@ -651,10 +652,17 @@ const packageVersionRemediation = (
   scope?: ClientRegistrationScope,
   launcherScope?: ClientRegistrationScope,
   launcherConfigPath?: string,
-): string =>
-  launcherScope === "project"
-    ? `This project-scoped registration in ${launcherConfigPath ?? configPath ?? client.configPath} requests ${packageReference}, while the current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}. REA setup writes only user-level configuration; update the package version in ${launcherConfigPath ?? configPath ?? client.configPath}, then restart the client.`
-    : `This registration requests ${packageReference}, while the current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}. REA does not resolve package-runner requests during doctor; update the registration with rea setup --client ${client.name}, then restart the client.`;
+  activation?: "enabled" | "disabled" | "unknown",
+): string => {
+  if (launcherScope === "project")
+    return `This project-scoped registration in ${launcherConfigPath ?? configPath ?? client.configPath} requests ${packageReference}, while the current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}. REA setup writes only user-level configuration; update the package version in ${launcherConfigPath ?? configPath ?? client.configPath}, then restart the client.`;
+  const base = `This registration requests ${packageReference}, while the current REA CLI package is ${PRODUCT_IDENTITY.packageVersion}. REA does not resolve package-runner requests during doctor; update the registration with rea setup --client ${client.name}, then restart the client.`;
+  if (scope === "project" && activation === "disabled") {
+    const target = configPath ?? client.configPath;
+    return `${base} REA setup writes only user-level client configuration and does not modify project-scoped configuration at ${target}. Update or remove the rea registration in ${target}, then restart the client.`;
+  }
+  return base;
+};
 
 const unavailableStatus = (
   client: SetupClient,
