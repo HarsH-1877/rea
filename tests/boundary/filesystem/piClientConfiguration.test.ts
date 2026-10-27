@@ -787,3 +787,120 @@ describe("Pi project trust enforcement", () => {
     });
   });
 });
+
+describe("Pi project trust error handling", () => {
+  it("preserves named trust failures in doctor and does not block uninstall when trust.json is malformed", async () => {
+    const { home, client } = await piClient();
+    const alignedCommand = command;
+    await mkdir(join(home, ".pi", "agent"), { recursive: true });
+    await writeFile(
+      client.configPath,
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            command: alignedCommand[0],
+            args: alignedCommand.slice(1),
+          },
+        },
+      }),
+    );
+
+    const projectDir = await createTestTempDirectory("rea-pi-malformed-trust-");
+    const projectConfigDir = join(projectDir, ".pi");
+    await mkdir(projectConfigDir, { recursive: true });
+    const projectConfigPath = resolve(projectConfigDir, "mcp.json");
+    await writeFile(
+      projectConfigPath,
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            command: alignedCommand[0],
+            args: alignedCommand.slice(1),
+          },
+        },
+      }),
+    );
+
+    const trustPath = join(home, ".pi", "agent", "trust.json");
+    await writeFile(trustPath, "{ malformed_json");
+
+    vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+
+    const statuses = await readClientRegistrationStatuses(home, undefined, {
+      environment: {},
+    });
+    const piStatus = statuses.find(({ client: c }) => c === "pi");
+    expect(piStatus).toMatchObject({
+      client: "pi",
+      state: "invalid",
+      scope: "project",
+      config_path: trustPath,
+    });
+    expect(piStatus?.remediation).toContain("malformed");
+
+    const host = systemUninstallHost(home);
+    const clients = await host.clients();
+    const projectClient = clients.find(
+      (c) => c.name === "pi" && c.configPath === projectConfigPath,
+    );
+    expect(projectClient).toBeDefined();
+    if (projectClient === undefined) throw new Error("missing project client");
+    const uninstallResult = await host.removeClient(projectClient);
+    expect(uninstallResult).toMatchObject({
+      name: "pi",
+      status: "removed",
+    });
+    const projectDoc = JSON.parse(await readFile(projectConfigPath, "utf8"));
+    expect(projectDoc.mcpServers.rea).toBeUndefined();
+  });
+
+  it("reports invalid project settings in doctor when settings.json is malformed", async () => {
+    const { home, client } = await piClient();
+    const alignedCommand = command;
+    await mkdir(join(home, ".pi", "agent"), { recursive: true });
+    await writeFile(
+      client.configPath,
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            command: alignedCommand[0],
+            args: alignedCommand.slice(1),
+          },
+        },
+      }),
+    );
+
+    const projectDir = await createTestTempDirectory(
+      "rea-pi-malformed-settings-",
+    );
+    const projectConfigDir = join(projectDir, ".pi");
+    await mkdir(projectConfigDir, { recursive: true });
+    await writeFile(
+      resolve(projectConfigDir, "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            enabled: false,
+          },
+        },
+      }),
+    );
+
+    const settingsPath = join(home, ".pi", "agent", "settings.json");
+    await writeFile(settingsPath, "{ malformed_json");
+
+    vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+
+    const statuses = await readClientRegistrationStatuses(home, undefined, {
+      environment: {},
+    });
+    const piStatus = statuses.find(({ client: c }) => c === "pi");
+    expect(piStatus).toMatchObject({
+      client: "pi",
+      state: "invalid",
+      scope: "project",
+      config_path: settingsPath,
+    });
+    expect(piStatus?.remediation).toContain("malformed");
+  });
+});

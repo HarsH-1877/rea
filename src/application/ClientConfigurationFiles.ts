@@ -1,3 +1,5 @@
+import { dirname, resolve } from "node:path";
+import { stripComments } from "jsonc-parser";
 import { err, ok, type Result } from "../domain/result.js";
 import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { readRegularFileText } from "./RegularFileRead.js";
@@ -249,6 +251,95 @@ const isPiPartialServerOverride = (
   !Object.hasOwn(entry, "url") &&
   !Object.hasOwn(entry, "type");
 
+/**
+ * Read-only evaluation of Pi's project trust boundary.
+ * Distinguishes explicit approvals/denials from unreadable/malformed trust files.
+ */
+export const isPiProjectTrusted = async (
+  settings: NonNullable<SetupClient["piSettings"]> | undefined,
+  resources?: ArtifactResourceScope,
+): Promise<Result<boolean, ClientConfigurationFileError>> => {
+  if (settings === undefined) return ok(true);
+  if (settings.env.PI_APPROVE === "true") return ok(true);
+  if (settings.env.PI_APPROVE === "false") return ok(false);
+  if (settings.env.PI_DEFAULT_PROJECT_TRUST === "always") return ok(true);
+  if (settings.env.PI_DEFAULT_PROJECT_TRUST === "never") return ok(false);
+
+  const trustText = await readConfigurationText(settings.trustPath, resources);
+  if (!trustText.ok) return trustText;
+  if (trustText.value !== undefined) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripComments(trustText.value));
+    } catch (cause: unknown) {
+      return err({
+        kind: "malformed",
+        path: settings.trustPath,
+        scope: "project",
+        detail: `Pi trust configuration in ${settings.trustPath} is malformed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      });
+    }
+    if (!isObject(parsed)) {
+      return err({
+        kind: "malformed",
+        path: settings.trustPath,
+        scope: "project",
+        detail: `Pi trust configuration in ${settings.trustPath} is malformed: expected a JSON object.`,
+      });
+    }
+    const resolvedProject = resolve(settings.projectDirectory);
+    let current = resolvedProject;
+    while (true) {
+      for (const [key, val] of Object.entries(parsed)) {
+        const resolvedKey = resolve(key);
+        const matches =
+          settings.platform === "win32" || settings.platform === "darwin"
+            ? resolvedKey.toLowerCase() === current.toLowerCase()
+            : resolvedKey === current;
+        if (matches) {
+          if (val === true) return ok(true);
+          if (val === false) return ok(false);
+        }
+      }
+      const parent = dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+
+  const settingsText = await readConfigurationText(
+    settings.settingsPath,
+    resources,
+  );
+  if (!settingsText.ok) return settingsText;
+  if (settingsText.value !== undefined) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripComments(settingsText.value));
+    } catch (cause: unknown) {
+      return err({
+        kind: "malformed",
+        path: settings.settingsPath,
+        scope: "project",
+        detail: `Pi settings in ${settings.settingsPath} are malformed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      });
+    }
+    if (!isObject(parsed)) {
+      return err({
+        kind: "malformed",
+        path: settings.settingsPath,
+        scope: "project",
+        detail: `Pi settings in ${settings.settingsPath} are malformed: expected a JSON object.`,
+      });
+    }
+    const defaultTrust = parsed.defaultProjectTrust;
+    if (defaultTrust === "always") return ok(true);
+    if (defaultTrust === "never") return ok(false);
+  }
+
+  return ok(false);
+};
+
 export interface EffectiveClientRegistrationConfiguration {
   readonly document: ClientConfigurationDocument | undefined;
   readonly configPath: string;
@@ -280,49 +371,53 @@ export const readEffectiveClientRegistrationConfiguration = async (
   ) {
     const projectPath = client.projectConfigPaths[0];
     if (projectPath !== undefined) {
-      piProjectFile = await readConfigurationFile(
-        projectPath,
-        client.format,
-        resources,
-      );
-      if (!piProjectFile.ok)
-        return err({ ...piProjectFile.error, scope: "project" });
-      if (piProjectFile.value !== undefined) {
-        const rawProjectRea = effectiveClientServer(
-          piProjectFile.value,
-          PRODUCT_IDENTITY.mcpServerKey,
+      const trust = await isPiProjectTrusted(client.piSettings, resources);
+      if (!trust.ok) return err({ ...trust.error, scope: "project" });
+      if (trust.value) {
+        piProjectFile = await readConfigurationFile(
+          projectPath,
+          client.format,
+          resources,
         );
-        if (
-          rawProjectRea !== undefined &&
-          !isPiPartialServerOverride(rawProjectRea)
-        ) {
-          const fragmentEnv = clientRegistrationEnvironment(
+        if (!piProjectFile.ok)
+          return err({ ...piProjectFile.error, scope: "project" });
+        if (piProjectFile.value !== undefined) {
+          const rawProjectRea = effectiveClientServer(
             piProjectFile.value,
-            {},
-            "fragment",
-            platform,
+            PRODUCT_IDENTITY.mcpServerKey,
           );
-          if (!fragmentEnv.ok)
-            return err(
-              invalidEnvironment(projectPath, fragmentEnv.error, "project"),
+          if (
+            rawProjectRea !== undefined &&
+            !isPiPartialServerOverride(rawProjectRea)
+          ) {
+            const fragmentEnv = clientRegistrationEnvironment(
+              piProjectFile.value,
+              {},
+              "fragment",
+              platform,
             );
-          const effectiveEnv = clientRegistrationEnvironment(
-            piProjectFile.value,
-            {},
-            "effective",
-            platform,
-          );
-          if (!effectiveEnv.ok)
-            return err(
-              invalidEnvironment(projectPath, effectiveEnv.error, "project"),
+            if (!fragmentEnv.ok)
+              return err(
+                invalidEnvironment(projectPath, fragmentEnv.error, "project"),
+              );
+            const effectiveEnv = clientRegistrationEnvironment(
+              piProjectFile.value,
+              {},
+              "effective",
+              platform,
             );
-          return ok({
-            document: piProjectFile.value,
-            configPath: projectPath,
-            scope: "project",
-            launcherScope: "project",
-            launcherConfigPath: projectPath,
-          });
+            if (!effectiveEnv.ok)
+              return err(
+                invalidEnvironment(projectPath, effectiveEnv.error, "project"),
+              );
+            return ok({
+              document: piProjectFile.value,
+              configPath: projectPath,
+              scope: "project",
+              launcherScope: "project",
+              launcherConfigPath: projectPath,
+            });
+          }
         }
       }
     }

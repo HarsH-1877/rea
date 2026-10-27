@@ -1,7 +1,6 @@
 import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
-import { lstatSync, readFileSync } from "node:fs";
-import { stripComments } from "jsonc-parser";
+import { lstatSync } from "node:fs";
 import { err, ok, type Result } from "../domain/result.js";
 import {
   HermesClientPathError,
@@ -31,6 +30,15 @@ export interface SetupClient {
     readonly workspaceDirectory: string;
     readonly trustedFoldersPath: string;
     readonly trustOverride?: boolean;
+    readonly platform: NodeJS.Platform;
+  };
+  /** Read-only Pi scopes and trust inputs; never setup write targets. */
+  readonly piSettings?: {
+    readonly agentDirectory: string;
+    readonly trustPath: string;
+    readonly settingsPath: string;
+    readonly projectDirectory: string;
+    readonly env: NodeJS.ProcessEnv;
     readonly platform: NodeJS.Platform;
   };
   /** Unresolved path evidence only; consumers must not perform I/O on it. */
@@ -129,6 +137,9 @@ interface ClientDefinitionBase {
   readonly geminiSettings?: (
     context: ClientPathContext,
   ) => NonNullable<SetupClient["geminiSettings"]>;
+  readonly piSettings?: (
+    context: ClientPathContext,
+  ) => NonNullable<SetupClient["piSettings"]>;
 }
 
 /** XDG treats an empty config-home value as unset. */
@@ -541,69 +552,8 @@ const existingOpenCodeConfigPath = (context: ClientPathContext): string => {
   );
 };
 
-const isPiProjectTrusted = (
-  context: ClientPathContext,
-  projectDir: string,
-): boolean => {
-  if (context.env.PI_APPROVE === "true") return true;
-  if (context.env.PI_APPROVE === "false") return false;
-  if (context.env.PI_DEFAULT_PROJECT_TRUST === "always") return true;
-  if (context.env.PI_DEFAULT_PROJECT_TRUST === "never") return false;
-
-  const agentDir = piAgentDirectory(context);
-  const trustFile = join(agentDir, "trust.json");
-  if (pathPresentOrUnresolved(trustFile)) {
-    try {
-      const text = readFileSync(trustFile, "utf8");
-      const parsed = JSON.parse(stripComments(text));
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const resolvedProject = resolve(projectDir);
-        let current = resolvedProject;
-        while (true) {
-          for (const [key, val] of Object.entries(
-            parsed as Record<string, unknown>,
-          )) {
-            const resolvedKey = resolve(key);
-            const matches =
-              context.platform === "win32" || context.platform === "darwin"
-                ? resolvedKey.toLowerCase() === current.toLowerCase()
-                : resolvedKey === current;
-            if (matches) {
-              if (val === true) return true;
-              if (val === false) return false;
-            }
-          }
-          const parent = dirname(current);
-          if (parent === current) break;
-          current = parent;
-        }
-      }
-    } catch {
-      return false;
-    }
-  }
-
-  const settingsFile = join(agentDir, "settings.json");
-  if (pathPresentOrUnresolved(settingsFile)) {
-    try {
-      const text = readFileSync(settingsFile, "utf8");
-      const parsed = JSON.parse(stripComments(text));
-      if (parsed && typeof parsed === "object") {
-        const defaultTrust = (parsed as Record<string, unknown>)
-          .defaultProjectTrust;
-        if (defaultTrust === "always") return true;
-        if (defaultTrust === "never") return false;
-      }
-    } catch {
-      return false;
-    }
-  }
-
-  return false;
-};
-
 const piProjectConfigurationPaths = (
-  context: ClientPathContext,
+  _context: ClientPathContext,
   userPaths: {
     readonly configPath: string;
     readonly configPaths?: readonly string[];
@@ -612,8 +562,22 @@ const piProjectConfigurationPaths = (
   const candidate = resolve(process.cwd(), ".pi", "mcp.json");
   if (resolve(candidate) === resolve(userPaths.configPath)) return [];
   if (!pathPresentOrUnresolved(candidate)) return [];
-  if (!isPiProjectTrusted(context, process.cwd())) return [];
   return [candidate];
+};
+
+const piSettings = (
+  context: ClientPathContext,
+): NonNullable<SetupClient["piSettings"]> => {
+  const paths = context.platform === "win32" ? win32 : posix;
+  const agentDirectory = piAgentDirectory(context);
+  return {
+    agentDirectory,
+    trustPath: paths.join(agentDirectory, "trust.json"),
+    settingsPath: paths.join(agentDirectory, "settings.json"),
+    projectDirectory: process.cwd(),
+    env: context.env,
+    platform: context.platform,
+  };
 };
 
 const geminiSettings = ({
@@ -820,11 +784,9 @@ export const SUPPORTED_CLIENT_DEFINITIONS = [
     name: "pi",
     displayName: "Pi",
     configPath: (context: ClientPathContext) =>
-      (context.platform === "win32" ? win32 : { join }).join(
-        piAgentDirectory(context),
-        "mcp.json",
-      ),
+      join(piAgentDirectory(context), "mcp.json"),
     projectConfigPaths: piProjectConfigurationPaths,
+    piSettings,
     markerPath: piAgentDirectory,
     format: "pi",
   },
@@ -1033,6 +995,9 @@ export const supportedClients = (
         ...(definition.geminiSettings === undefined
           ? {}
           : { geminiSettings: definition.geminiSettings(context) }),
+        ...(definition.piSettings === undefined
+          ? {}
+          : { piSettings: definition.piSettings(context) }),
         ...(configPaths === undefined ? {} : { configPaths }),
         ...(projectConfigPaths === undefined ? {} : { projectConfigPaths }),
         ...(definition.zcodeFallbackPath === undefined
