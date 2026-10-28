@@ -292,3 +292,25 @@ Use [`inspect_devicetree`](devicetree.md) / `rea inspect-devicetree` on an
 extracted DTB for its node/property tree, reservations, hardware summary and
 selected phandle relationships. FDT v16/v17 inspection is portable and requires
 no external tool or disassembler.
+
+## Inspect Intel HEX and S-record images
+
+Use `inspect-artifact` / `inspect_artifact` on an Intel HEX or Motorola S-record
+file for its address regions, declared start address and record facts, then
+`extract-artifact` / `extract_artifact` for one raw file per region. Decoding is
+portable and requires no external tool. See
+[Intel HEX and S-record images](hex-records.md).
+
+## Inspect U-Boot legacy uImages
+
+`inspect-artifact` / `extract-artifact` recognize a legacy uImage by its
+`0x27051956` magic and inventory it without running or decompressing it.
+The root facts record the 64-byte header (architecture, OS, type, and
+compression as raw values and names, load and entry addresses, image name,
+and timestamp) with the header and data CRC32 verified; the stored payload
+is extractable as `payload.bin`, and multi-file images additionally expose
+each sub-image as `image-<n>.bin` from the stored size table. Declared
+addresses are facts from the header, not proven entry points, and compressed
+payloads stay as stored. Intel HEX/S-record and FIT images are separate
+readers and are not covered here. See [U-Boot legacy uImage](uimage.md) for
+component padding, preserved names, resource policies and verification scope.

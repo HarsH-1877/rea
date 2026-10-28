@@ -1,3 +1,7 @@
+import {
+  currentClientRegistrationCommand,
+  classifyClientRegistrationCommand,
+} from "../../../src/application/ClientRegistrationIdentity.js";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
@@ -15,20 +19,13 @@ import { systemUninstallHost } from "../../../src/application/Uninstall.js";
 import { supportedClients } from "../../../src/application/SupportedClients.js";
 import { PRODUCT_IDENTITY } from "../../../src/identity.js";
 import {
-  classifyClientRegistrationCommand,
-  npxRegistrationCommand,
-} from "../../../src/application/ClientRegistrationIdentity.js";
-import {
   CURRENT_ENTRYPOINT_PATH,
   normalizeEntrypointPath,
 } from "../../../src/process/CurrentEntrypointPath.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
-import {
-  clearClientLocationEnvironment,
-  NPX_REGISTRATION_COMMAND,
-} from "../../fixtures/clientEnvironment.js";
+import { clearClientLocationEnvironment } from "../../fixtures/clientEnvironment.js";
 
-const command = NPX_REGISTRATION_COMMAND;
+const command = currentClientRegistrationCommand();
 
 beforeEach(clearClientLocationEnvironment);
 
@@ -144,7 +141,7 @@ describe("additional client configuration dialects", () => {
     if (name === "vscode" || name === "omp" || name === "pi")
       expect(registration).toMatchObject({
         type: "stdio",
-        command: "npx",
+        command: command[0],
         args: command.slice(1),
       });
     if (name === "copilot_cli")
@@ -153,7 +150,7 @@ describe("additional client configuration dialects", () => {
       expect(registration).toMatchObject({
         transport: "stdio",
         enabled: true,
-        command: "npx",
+        command: command[0],
         args: command.slice(1),
       });
 
@@ -600,7 +597,7 @@ describe("OpenCode project-scoped discovery", () => {
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 
     const projectConfigPath = resolve(projectDir, "opencode.json");
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     await writeFile(
       projectConfigPath,
       JSON.stringify({
@@ -638,12 +635,8 @@ describe("OpenCode project-scoped discovery", () => {
     );
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 
-    const alignedCommand = npxRegistrationCommand(process.platform);
-    const staleCommand = [
-      ...alignedCommand.slice(0, -2),
-      "rea-agents@1.0.0",
-      "mcp",
-    ];
+    const alignedCommand = command;
+    const staleCommand = ["npx", "-y", "rea-agents@1.0.0", "mcp"];
 
     // Stale user registration
     await writeFile(
@@ -698,12 +691,8 @@ describe("OpenCode project-scoped precedence and drift", () => {
     await mkdir(subDir, { recursive: true });
     vi.spyOn(process, "cwd").mockReturnValue(subDir);
 
-    const alignedCommand = npxRegistrationCommand(process.platform);
-    const staleCommand = [
-      ...alignedCommand.slice(0, -2),
-      "rea-agents@1.0.0",
-      "mcp",
-    ];
+    const alignedCommand = command;
+    const staleCommand = ["npx", "-y", "rea-agents@1.0.0", "mcp"];
 
     // Lower precedence in parentDir
     await writeFile(
@@ -765,12 +754,8 @@ describe("OpenCode project-scoped precedence and drift", () => {
     );
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 
-    const alignedCommand = npxRegistrationCommand(process.platform);
-    const staleCommand = [
-      ...alignedCommand.slice(0, -2),
-      "rea-agents@1.0.0",
-      "mcp",
-    ];
+    const alignedCommand = command;
+    const staleCommand = ["npx", "-y", "rea-agents@1.0.0", "mcp"];
 
     const projectConfigPath = resolve(projectDir, "opencode.json");
     await writeFile(
@@ -851,7 +836,7 @@ describe("OpenCode cross-setting environment merge and launcher uninstall", () =
     );
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     const userConfigPath = join(home, ".config", "opencode", "opencode.json");
     await mkdir(join(home, ".config", "opencode"), { recursive: true });
     await writeFile(
@@ -908,7 +893,7 @@ describe("OpenCode cross-setting environment merge and launcher uninstall", () =
     );
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     const projectConfigPath = resolve(projectDir, "opencode.json");
     await writeFile(
       projectConfigPath,
@@ -949,7 +934,7 @@ describe("OpenCode cross-setting environment merge and launcher uninstall", () =
     );
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     const projectConfigPath = resolve(projectDir, "opencode.json");
     await writeFile(
       projectConfigPath,
@@ -985,7 +970,7 @@ describe("OpenCode project-scoped inheritance and fallback", () => {
     );
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     await writeFile(
       client.configPath,
       JSON.stringify({
@@ -1145,7 +1130,7 @@ describe("OpenCode Git worktree boundary", () => {
       }),
     );
     const insideConfig = join(worktreeDir, "opencode.json");
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     await writeFile(
       insideConfig,
       JSON.stringify({
@@ -1180,7 +1165,7 @@ describe("OpenCode project-scoped uninstall", () => {
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 
     const projectConfigPath = resolve(projectDir, "opencode.jsonc");
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     await writeFile(
       projectConfigPath,
       `{\n  // Sibling comment\n  "mcp": {\n    "servers": {\n      "other": { "type": "local", "command": ["node", "other.js"] },\n      "rea": {\n        "type": "local",\n        "command": ${JSON.stringify(alignedCommand)},\n        "enabled": true\n      }\n    }\n  }\n}\n`,
@@ -1220,7 +1205,7 @@ describe("OpenCode project-scoped uninstall", () => {
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 
     const projectConfigPath = resolve(projectDir, "opencode.json");
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     await writeFile(
       projectConfigPath,
       JSON.stringify({
@@ -1284,7 +1269,7 @@ describe("OpenCode project-scoped uninstall shared settings", () => {
 
     // Higher-precedence project file has an owned rea launcher
     const projectConfigPath = resolve(projectDir, "opencode.json");
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     await writeFile(
       projectConfigPath,
       JSON.stringify({
@@ -1356,7 +1341,7 @@ describe("OpenCode project-scoped uninstall ownership boundaries", () => {
 
     // Higher-precedence project file has an owned rea launcher
     const projectConfigPath = resolve(projectDir, "opencode.json");
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     await writeFile(
       projectConfigPath,
       JSON.stringify({
@@ -1407,7 +1392,7 @@ describe("OpenCode project-scoped uninstall ownership boundaries", () => {
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 
     const projectConfigPath = resolve(projectDir, "opencode.json");
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     await writeFile(
       projectConfigPath,
       JSON.stringify({

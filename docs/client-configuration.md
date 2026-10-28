@@ -14,12 +14,17 @@ interpreter: the npm launcher's `#!/usr/bin/env node` still searches `PATH` for
 Node. Running that command successfully in a terminal does not establish that
 the client can launch it.
 
-For direct JavaScript installations, setup registers the selected runtime
+For JavaScript installations, setup registers the selected runtime
 executable and REA script by absolute path. On POSIX, it prefers executable
 `node` or `bun` and REA aliases on setup's `PATH` only when they resolve to the
 same selected files. This preserves manager-owned aliases across version updates;
-otherwise setup uses the selected paths directly. Package-runner registrations keep
-their selected runner. Setup does not copy your ambient environment into client
+otherwise setup uses the selected paths directly. This also applies when setup
+runs through a package runner: retain the selected cache entry and runtime while
+the registration uses them. Clearing either makes startup fail without resolving
+another package from the client's project. Restore the same installation before
+repairing it; an unidentified registration remains untouched. See
+[installation and recovery](installation.md#package-runners-and-global-installation).
+Setup does not copy your ambient environment into client
 settings. To refresh an older registration, preview
 `rea setup --client <client-id> --skill=false --dry-run`, then run the same command
 without `--dry-run` and approve the displayed changes. Setup preserves unrelated
@@ -641,6 +646,12 @@ boundaries. FreeBuff MCP loading and skill discovery have not been verified
 with an installed native FreeBuff client/version; filesystem tests cover REA's
 editing, discovery, and ownership behavior only. Automatic applicability
 requires the FreeBuff profile directory even when the shared MCP file exists.
+When uninstall cannot establish FreeBuff or another shared-storage reader from
+product discovery, a malformed or unreadable shared MCP file is retained
+unchanged and does not stop other REA removals, including `--purge-data`. When
+FreeBuff or ZCode product applicability is established or unresolved, the same
+malformed shared file stops uninstall before removals. See
+[Diagnose, update, and remove](installation.md#diagnose-update-and-remove).
 
 FreeBuff setup support requires `rea-agents@6.8.0` or later. Older versions
 reject `rea setup --client freebuff` as an unsupported client. See the

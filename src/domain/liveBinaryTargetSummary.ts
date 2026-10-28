@@ -67,7 +67,17 @@ export const liveBinaryTargetSummaryVariants = [
   z.object({
     ...identity,
     kind: z.literal("archive"),
-    format: z.enum([...ZIP_PACKAGE_FORMATS, "asar", "godot-pck", "dmg", "pkg"]),
+    format: z.enum([
+      ...ZIP_PACKAGE_FORMATS,
+      "asar",
+      "godot-pck",
+      "unityfs",
+      "uimage",
+      "dmg",
+      "pkg",
+      "intel-hex",
+      "srec",
+    ]),
     architecture: z.null(),
   }),
   z.object({

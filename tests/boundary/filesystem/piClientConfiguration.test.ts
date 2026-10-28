@@ -1,3 +1,4 @@
+import { currentClientRegistrationCommand } from "../../../src/application/ClientRegistrationIdentity.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, posix, resolve } from "node:path";
 
@@ -5,21 +6,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readClientRegistrationStatuses } from "../../../src/application/ClientRegistrationStatus.js";
 import { parseClientConfiguration } from "../../../src/application/ClientConfigurationDocument.js";
-import { npxRegistrationCommand } from "../../../src/application/ClientRegistrationIdentity.js";
 import {
   configureClientConfiguration,
   inspectClientConfiguration,
 } from "../../../src/application/SetupClientConfiguration.js";
 import { detectClients } from "../../../src/application/SetupHost.js";
 import { supportedClients } from "../../../src/application/SupportedClients.js";
-import {
-  runUninstall,
-  systemUninstallHost,
-} from "../../../src/application/Uninstall.js";
+import { systemUninstallHost } from "../../../src/application/Uninstall.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { clearClientLocationEnvironment } from "../../fixtures/clientEnvironment.js";
-
-const command = npxRegistrationCommand(process.platform);
 
 beforeEach(clearClientLocationEnvironment);
 afterEach(() => vi.unstubAllEnvs());
@@ -32,6 +27,8 @@ const piPath = (
 
 // Catch fallback to OMP paths, loss of relative overrides, and normalization
 // that differs from Pi's public getAgentDir()/normalizePath boundary.
+const command = currentClientRegistrationCommand();
+
 describe("Pi user configuration paths", () => {
   it.each([
     [undefined, "/home/a/.pi/agent"],
@@ -254,7 +251,7 @@ describe("Pi strict JSON parsing", () => {
       expect(
         await inspectClientConfiguration(client, {}, command),
       ).toMatchObject({ status: "invalid" });
-      expect(await configureClientConfiguration(client, {}, command)).toEqual({
+      expect(await configureClientConfiguration(client, {})).toEqual({
         status: "failed",
         reason: "readback",
       });
@@ -351,7 +348,6 @@ describe("Pi project-scoped discovery and overrides", () => {
     const projectConfigDir = join(projectDir, ".pi");
     await mkdir(projectConfigDir, { recursive: true });
     const projectConfigPath = resolve(projectConfigDir, "mcp.json");
-    const command = npxRegistrationCommand(process.platform);
     await writeFile(
       projectConfigPath,
       JSON.stringify({
@@ -398,7 +394,6 @@ describe("Pi project-scoped discovery and overrides", () => {
     const projectConfigDir = join(projectDir, ".pi");
     await mkdir(projectConfigDir, { recursive: true });
     const projectConfigPath = resolve(projectConfigDir, "mcp.json");
-    const command = npxRegistrationCommand(process.platform);
     await writeFile(
       projectConfigPath,
       JSON.stringify({
@@ -449,7 +444,6 @@ describe("Pi project-scoped discovery and overrides", () => {
     const projectConfigDir = join(projectDir, ".pi");
     await mkdir(projectConfigDir, { recursive: true });
     const projectConfigPath = resolve(projectConfigDir, "mcp.json");
-    const command = npxRegistrationCommand(process.platform);
     await writeFile(
       projectConfigPath,
       JSON.stringify({
@@ -482,7 +476,6 @@ describe("Pi project-scoped partial overrides", () => {
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
     await trustPiProject(home, projectDir);
 
-    const command = npxRegistrationCommand(process.platform);
     await writeFile(
       client.configPath,
       JSON.stringify({
@@ -568,12 +561,7 @@ describe("Pi project-scoped launcher provenance and fallback", () => {
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
     await trustPiProject(home, projectDir);
 
-    const alignedCommand = npxRegistrationCommand(process.platform);
-    const staleCommand = [
-      ...alignedCommand.slice(0, -2),
-      "rea-agents@1.0.0",
-      "mcp",
-    ];
+    const staleCommand = ["npx", "-y", "rea-agents@1.0.0", "mcp"];
 
     await writeFile(
       client.configPath,
@@ -624,12 +612,7 @@ describe("Pi project-scoped launcher provenance and fallback", () => {
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
     await trustPiProject(home, projectDir);
 
-    const alignedCommand = npxRegistrationCommand(process.platform);
-    const staleCommand = [
-      ...alignedCommand.slice(0, -2),
-      "rea-agents@1.0.0",
-      "mcp",
-    ];
+    const staleCommand = ["npx", "-y", "rea-agents@1.0.0", "mcp"];
 
     await writeFile(
       client.configPath,
@@ -719,7 +702,6 @@ describe("Pi project-scoped uninstall", () => {
     const projectConfigDir = join(projectDir, ".pi");
     await mkdir(projectConfigDir, { recursive: true });
     const projectConfigPath = resolve(projectConfigDir, "mcp.json");
-    const command = npxRegistrationCommand(process.platform);
     await writeFile(
       projectConfigPath,
       JSON.stringify({
@@ -802,7 +784,6 @@ describe("Pi project-scoped uninstall", () => {
     const projectConfigDir = join(projectDir, ".pi");
     await mkdir(projectConfigDir, { recursive: true });
     const projectConfigPath = resolve(projectConfigDir, "mcp.json");
-    const command = npxRegistrationCommand(process.platform);
     await writeFile(
       projectConfigPath,
       JSON.stringify({
@@ -852,7 +833,7 @@ describe("Pi project trust enforcement", () => {
     const projectDir = await createTestTempDirectory("rea-pi-untrusted-");
     vi.spyOn(process, "cwd").mockReturnValue(projectDir);
 
-    const alignedCommand = npxRegistrationCommand(process.platform);
+    const alignedCommand = command;
     await writeFile(
       client.configPath,
       JSON.stringify({

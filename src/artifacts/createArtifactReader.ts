@@ -4,12 +4,15 @@ import type { NodeSeaAdmission } from "./nodeSea/NodeSeaAdmission.js";
 import type { AsarHeaderAdmission } from "../config/asarHeaderAdmission.js";
 import { AsarArtifactReader } from "./AsarArtifactReader.js";
 import type { ArtifactReader } from "./ArtifactReader.js";
+import { HexRecordArtifactReader } from "./HexRecordArtifactReader.js";
 import { DirectoryArtifactReader } from "./DirectoryArtifactReader.js";
 import { GodotPckArtifactReader } from "./GodotPckArtifactReader.js";
 import { MachOSliceArtifactReader } from "./MachOSliceArtifactReader.js";
 import { NativeDmgArtifactReader } from "./NativeDmgArtifactReader.js";
 import { NodeSeaArtifactReader } from "./NodeSeaArtifactReader.js";
 import { PyInstallerArtifactReader } from "./PyInstallerArtifactReader.js";
+import { UImageArtifactReader } from "./UImageArtifactReader.js";
+import { UnityFsArtifactReader } from "./UnityFsArtifactReader.js";
 import { ZipArtifactReader } from "./ZipArtifactReader.js";
 import type { ArtifactOccurrence } from "../domain/artifactGraph.js";
 import {
@@ -25,6 +28,10 @@ export type ArtifactReaderFormat =
   | "pyinstaller"
   | "node-sea"
   | "godot-pck"
+  | "unityfs"
+  | "uimage"
+  | "intel-hex"
+  | "srec"
   | "mach-o-universal"
   | "dmg"
   | ZipPackageFormat;
@@ -105,6 +112,13 @@ export function createArtifactReader(
           ? admission
           : rootSource,
       );
+    case "uimage":
+      return new UImageArtifactReader(path, rootSource);
+    case "unityfs":
+      return new UnityFsArtifactReader(path, rootSource);
+    case "intel-hex":
+    case "srec":
+      return new HexRecordArtifactReader(path, format, rootSource);
     case "mach-o-universal":
       return new MachOSliceArtifactReader(
         path,
