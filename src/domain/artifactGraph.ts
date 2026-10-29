@@ -90,6 +90,8 @@ const artifactFormatSchema = z.enum([
   "node-sea",
   "intel-hex",
   "srec",
+  "esp-image",
+  "fit",
   "unknown",
 ]);
 
@@ -101,6 +103,8 @@ const artifactContentFormatSchema = artifactFormatSchema.extract([
   "uimage",
   "intel-hex",
   "srec",
+  "esp-image",
+  "fit",
   "mach-o-universal",
   "mach-o",
   "elf",

@@ -170,7 +170,9 @@ Setup leaves existing skill copies in other locations untouched.
 Setup refuses symbolic links at the selected skill directory or its managed
 `references` directory, matching uninstall and update's ownership rules. Use a
 regular skill directory, or select `--skill=false` to configure the client
-registration without installing the bundled skill.
+registration without installing the bundled skill. A non-directory ancestor is
+reported as `ENOTDIR`; preserve the blocking file and correct the directory path
+before rerunning setup.
 The final selected directories are checked before approval and again before
 setup changes any client or Hopper installation. Unselected client destinations
 do not block other setup choices. Doctor reports linked or non-directory skill
@@ -379,7 +381,7 @@ Select the part you want to check:
 | Task                                | Readiness check                                                          |
 | ----------------------------------- | ------------------------------------------------------------------------ |
 | Static JavaScript/Electron analysis | Run `rea analyze-javascript-application PATH --json` directly.           |
-| One analysis engine                 | `rea doctor --provider ghidra --json` (or `hopper`, `ida`)               |
+| One analysis engine                 | `rea doctor --provider ghidra --json` (or `hopper`, `ida`, `kuna`)       |
 | One agent registration              | `rea doctor --client codex --json` (see [client IDs](#supported-agents)) |
 | Installed workflow instructions     | `rea doctor --skill --json`                                              |
 
@@ -1018,7 +1020,7 @@ reported as incompatible instead of being admitted from its directory name, and
 a header that cannot be read or recognized is reported as unknown. REA does not
 build or install native tools, or change Gatekeeper quarantine settings.
 
-The adapter exposes 26 read-only operations: fourteen inventory/name/search
+The adapter exposes 27 read-only operations: fifteen inventory/name/search
 operations and twelve function-analysis operations. These cover metadata,
 decompilation, assembly, resolved calls, typed references, xrefs, function
 dossiers, instructions, recovered data types, measured load mappings, loaded
@@ -1553,7 +1555,7 @@ On a controlled Windows x64 runner, use
 `npm run verify:ghidra:windows`. The verifier generates a deterministic native
 PE fixture from source bytes and requires the Windows native authority before
 opening the provider. The controls are implemented on main; see the
-[release boundary](#released-package-and-main). The lane verifies all 26 admitted
+[release boundary](#released-package-and-main). The lane verifies all 27 admitted
 read-only operations, digest identity, and runtime cleanup. The separate
 `verify:ghidra:windows:package` lane checks the packed CLI/MCP boundary with an
 ordinary user. It requires the built Windows native bundle and an existing

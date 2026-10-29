@@ -286,6 +286,15 @@ REA_FIRMWARE_VERIFY_GHIDRA=1 npm run verify:firmware
 generated gzip/USTAR/ext4 with a Linux x64 ELF child; SquashFS, UBIFS, proprietary
 firmware, other hosts and architectures remain unverified.
 
+## Inspect ESP images
+
+Use `inspect-artifact` / `inspect_artifact` on an ESP32-family app or
+bootloader image, such as an OTA download or app partition, for its chip,
+classified segments, checksum and SHA-256 results, descriptor and Secure Boot
+v2 signature blocks. `extract-artifact` / `extract_artifact` writes one file
+per segment and signature block. Reading is portable and needs no external
+tool. See [ESP images](esp-image.md).
+
 ## Inspect extracted devicetrees
 
 Use [`inspect_devicetree`](devicetree.md) / `rea inspect-devicetree` on an
@@ -308,9 +317,17 @@ portable and requires no external tool. See
 The root facts record the 64-byte header (architecture, OS, type, and
 compression as raw values and names, load and entry addresses, image name,
 and timestamp) with the header and data CRC32 verified; the stored payload
-is extractable as `payload.bin`, and multi-file images additionally expose
-each sub-image as `image-<n>.bin` from the stored size table. Declared
+is extractable as `payload.bin`, and multi-file and script images additionally
+expose each sub-image as `image-<n>.bin` from the stored size table. Declared
 addresses are facts from the header, not proven entry points, and compressed
 payloads stay as stored. Intel HEX/S-record and FIT images are separate
 readers and are not covered here. See [U-Boot legacy uImage](uimage.md) for
 component padding, preserved names, resource policies and verification scope.
+
+## Inspect U-Boot FIT images
+
+Use `inspect-artifact` / `inspect_artifact` on a U-Boot FIT (`.itb`) for its
+images, declared load and entry addresses, configurations and verified hashes,
+then `extract-artifact` / `extract_artifact` for one raw file per image.
+Decoding is portable and requires no external tool. See
+[U-Boot FIT images](fit-images.md).

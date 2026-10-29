@@ -170,7 +170,9 @@ export const classifyAndHashRootForInventory = async (
       format === "pyinstaller" ||
       format === "node-sea" ||
       format === "intel-hex" ||
-      format === "srec";
+      format === "srec" ||
+      format === "esp-image" ||
+      format === "fit";
     outcome = {
       kind: "completed",
       value: {
