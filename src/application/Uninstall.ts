@@ -595,66 +595,15 @@ export const systemUninstallHost = (
               );
           }
         }
-        if (
-          client.format === "opencode" &&
-          (removal.value.removeNative || removal.value.legacyPath !== undefined)
-        ) {
-          const originalLayers: ClientConfigurationSource[] = [];
-          const remainingLayers: ClientConfigurationSource[] = [];
-          for (const configPath of client.configPaths ?? [client.configPath]) {
-            const layer =
-              configPath === client.configPath
-                ? read
-                : await readClientConfiguration(
-                    { ...client, configPath },
-                    fileSystem,
-                    resources,
-                    ownershipEstablished,
-                  );
-            if (layer.kind === "item") {
-              if (layer.item.status !== "skipped") return layer.item;
-              continue;
-            }
-            const layerRemoval = clientRegistrationRemoval(
-              layer.parsed,
-              layer.original,
-              client,
-            );
-            if (!layerRemoval.ok)
-              return item(client.name, "failed", layerRemoval.error.detail);
-            originalLayers.push({ ...layer.parsed, sourcePath: configPath });
-            const servers = { ...layer.parsed.servers };
-            const legacyServers = { ...layer.parsed.legacyServers };
-            const name = PRODUCT_IDENTITY.mcpServerKey;
-            if (layerRemoval.value.removeNative) delete servers[name];
-            if (layerRemoval.value.legacyPath !== undefined)
-              delete legacyServers[name];
-            remainingLayers.push({
-              ...layer.parsed,
-              servers,
-              legacyServers,
-              sourcePath: configPath,
-            });
-          }
-          const selected =
-            effectiveClientConfiguration(originalLayers)?.servers[
-              PRODUCT_IDENTITY.mcpServerKey
-            ];
-          const remaining =
-            effectiveClientConfiguration(remainingLayers)?.servers[
-              PRODUCT_IDENTITY.mcpServerKey
-            ];
-          const altersEffectiveRegistration =
-            clientRegistrationOwnership(selected, client) === "owned"
-              ? remaining !== undefined
-              : !isDeepStrictEqual(selected, remaining);
-          if (altersEffectiveRegistration)
-            return item(
-              client.name,
-              "failed",
-              "Removing REA's registration would activate or change an unowned OpenCode registration in another configuration layer, including a possible V1 fallback; no change was made. Remove or replace that registration manually, then rerun uninstall.",
-            );
-        }
+        const layeredOpenCodeIssue = await verifyOpenCodeLayeredRemoval(
+          client,
+          read,
+          removal.value,
+          fileSystem,
+          resources,
+          ownershipEstablished,
+        );
+        if (layeredOpenCodeIssue !== undefined) return layeredOpenCodeIssue;
         if (
           !removal.value.removeNative &&
           removal.value.legacyPath === undefined
@@ -950,6 +899,89 @@ const UNOWNED_LEGACY_FALLBACK_DETAIL = `OpenCode falls back to the V1 "mcp.${PRO
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const verifyOpenCodeLayeredRemoval = async (
+  client: UninstallClient,
+  read: { parsed: ClientConfigurationDocument; original: string },
+  removal: {
+    removeNative: boolean;
+    legacyPath?: readonly string[] | undefined;
+  },
+  fileSystem: UninstallFileSystem,
+  resources: ArtifactResourceScope,
+  ownershipEstablished = true,
+): Promise<UninstallItem | undefined> => {
+  if (
+    client.format !== "opencode" ||
+    (!removal.removeNative && removal.legacyPath === undefined)
+  )
+    return undefined;
+  const originalLayers: ClientConfigurationSource[] = [];
+  const remainingLayers: ClientConfigurationSource[] = [];
+  const allLayers = [
+    ...new Set([
+      ...(client.configPaths ?? [client.configPath]),
+      ...(client.projectConfigPaths ?? []),
+    ]),
+  ];
+  for (const configPath of allLayers) {
+    const layer: ClientConfigurationRead =
+      configPath === client.configPath
+        ? {
+            kind: "configuration",
+            transactionPath: client.configPath,
+            original: read.original,
+            parsed: read.parsed,
+          }
+        : await readClientConfiguration(
+            { ...client, configPath },
+            fileSystem,
+            resources,
+            ownershipEstablished,
+          );
+    if (layer.kind === "item") {
+      if (layer.item.status !== "skipped") return layer.item;
+      continue;
+    }
+    const layerRemoval =
+      configPath === client.configPath
+        ? ok(removal)
+        : clientRegistrationRemoval(layer.parsed, layer.original, client);
+    if (!layerRemoval.ok)
+      return item(client.name, "failed", layerRemoval.error.detail);
+    originalLayers.push({ ...layer.parsed, sourcePath: configPath });
+    const servers = { ...layer.parsed.servers };
+    const legacyServers = { ...layer.parsed.legacyServers };
+    const name = PRODUCT_IDENTITY.mcpServerKey;
+    if (layerRemoval.value.removeNative) delete servers[name];
+    if (layerRemoval.value.legacyPath !== undefined) delete legacyServers[name];
+    remainingLayers.push({
+      ...layer.parsed,
+      servers,
+      legacyServers,
+      sourcePath: configPath,
+    });
+  }
+  const selected =
+    effectiveClientConfiguration(originalLayers)?.servers[
+      PRODUCT_IDENTITY.mcpServerKey
+    ];
+  const remaining =
+    effectiveClientConfiguration(remainingLayers)?.servers[
+      PRODUCT_IDENTITY.mcpServerKey
+    ];
+  const altersEffectiveRegistration =
+    clientRegistrationOwnership(selected, client) === "owned"
+      ? remaining !== undefined
+      : !isDeepStrictEqual(selected, remaining);
+  if (altersEffectiveRegistration)
+    return item(
+      client.name,
+      "failed",
+      "Removing REA's registration would activate or change an unowned OpenCode registration in another configuration layer, including a possible V1 fallback, that is not REA-owned; no change was made. Remove or replace that registration manually, then rerun uninstall.",
+    );
+  return undefined;
+};
+
 const unownedLowerLayerFallback = async (
   client: SetupClient,
   fileSystem: UninstallFileSystem,
@@ -1080,6 +1112,15 @@ const removeClient = async (
       "retained",
       "The rea-named registration is not REA-owned.",
     );
+  const layeredOpenCodeIssue = await verifyOpenCodeLayeredRemoval(
+    client,
+    read,
+    removal.value,
+    fileSystem,
+    resources,
+    preflightOwned,
+  );
+  if (layeredOpenCodeIssue !== undefined) return layeredOpenCodeIssue;
   const unownedFallback = await unownedLowerLayerFallback(client, fileSystem);
   if (unownedFallback !== undefined)
     return item(client.name, "failed", unownedFallback);

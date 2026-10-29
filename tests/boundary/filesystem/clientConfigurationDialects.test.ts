@@ -1385,7 +1385,88 @@ describe("OpenCode project-scoped uninstall ownership boundaries", () => {
       readFile(`${projectConfigPath}.rea.backup`, "utf8"),
     ).rejects.toThrow();
   });
+});
 
+describe("OpenCode ancestor and descendant project-scoped uninstall boundaries", () => {
+  it("refuses to remove an owned ancestor registration when a descendant project configuration overrides command with a foreign launcher", async () => {
+    const { home } = await openCodeClient("rea-opencode-descendant-foreign-");
+    const repoDir = await createTestTempDirectory(
+      "rea-opencode-ancestor-repo-",
+    );
+    await mkdir(join(repoDir, ".git"), { recursive: true });
+
+    // Ancestor file has an owned rea launcher with type and environment
+    const ancestorConfig = resolve(repoDir, "opencode.json");
+    await writeFile(
+      ancestorConfig,
+      JSON.stringify({
+        mcp: {
+          servers: {
+            rea: {
+              type: "local",
+              command,
+              environment: { INHERITED_SETTING: "1" },
+            },
+          },
+        },
+      }),
+    );
+
+    // Descendant directory and child config
+    const childDir = resolve(repoDir, "child");
+    await mkdir(childDir, { recursive: true });
+    const childConfig = resolve(childDir, "opencode.json");
+    await writeFile(
+      childConfig,
+      JSON.stringify({
+        mcp: {
+          servers: {
+            rea: {
+              command: ["/usr/bin/custom-launcher"],
+            },
+          },
+        },
+      }),
+    );
+
+    vi.spyOn(process, "cwd").mockReturnValue(childDir);
+
+    const host = systemUninstallHost(home);
+    const clients = await host.clients();
+    const ancestorClient = clients.find(
+      (c) => c.name === "opencode" && c.configPath === ancestorConfig,
+    );
+    if (ancestorClient === undefined)
+      throw new Error("missing ancestor project client");
+
+    // Inspect preflight fails because removing ancestor breaks descendant's inherited settings
+    const preflight = await host.inspectClient(ancestorClient);
+    expect(preflight).toMatchObject({
+      status: "failed",
+      detail: expect.stringContaining("activate or change"),
+    });
+
+    // Remove client refuses
+    const result = await host.removeClient(ancestorClient);
+    expect(result).toMatchObject({
+      name: "opencode",
+      status: "failed",
+      detail: expect.stringContaining("activate or change"),
+    });
+
+    // Ancestor file is unchanged and no backup is created
+    const ancestorAfter = JSON.parse(await readFile(ancestorConfig, "utf8"));
+    expect(ancestorAfter.mcp?.servers?.rea?.command).toEqual(command);
+    expect(
+      ancestorAfter.mcp?.servers?.rea?.environment?.INHERITED_SETTING,
+    ).toBe("1");
+    await expect(
+      readFile(`${ancestorConfig}.rea.backup`, "utf8"),
+    ).rejects.toThrow();
+  });
+});
+
+describe("OpenCode registration argument normalization", () => {
   it("recognizes command ownership and uninstalls when OpenCode registration has array command with leftover args", async () => {
     const home = await createTestTempDirectory("rea-opencode-args-home-");
     const projectDir = await createTestTempDirectory("rea-opencode-args-cwd-");
