@@ -899,6 +899,10 @@ const UNOWNED_LEGACY_FALLBACK_DETAIL = `OpenCode falls back to the V1 "mcp.${PRO
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const hasLauncher = (entry: unknown): boolean =>
+  isObject(entry) &&
+  (Object.hasOwn(entry, "command") || Object.hasOwn(entry, "url"));
+
 const verifyOpenCodeLayeredRemoval = async (
   client: UninstallClient,
   read: { parsed: ClientConfigurationDocument; original: string },
@@ -969,10 +973,11 @@ const verifyOpenCodeLayeredRemoval = async (
     effectiveClientConfiguration(remainingLayers)?.servers[
       PRODUCT_IDENTITY.mcpServerKey
     ];
+  const remainingHasLauncher = hasLauncher(remaining);
   const altersEffectiveRegistration =
     clientRegistrationOwnership(selected, client) === "owned"
-      ? remaining !== undefined
-      : !isDeepStrictEqual(selected, remaining);
+      ? remainingHasLauncher
+      : remainingHasLauncher && !isDeepStrictEqual(selected, remaining);
   if (altersEffectiveRegistration)
     return item(
       client.name,
@@ -1020,21 +1025,14 @@ const unownedLowerLayerFallback = async (
     effectiveLower.legacyServers[name];
   if (remainingServer === undefined) return undefined;
 
-  const hasLauncher =
-    isObject(remainingServer) &&
-    (Object.hasOwn(remainingServer, "command") ||
-      Object.hasOwn(remainingServer, "url"));
-  if (!hasLauncher) return undefined;
+  if (!hasLauncher(remainingServer)) return undefined;
 
   if (clientRegistrationOwnership(remainingServer, client) !== "owned") {
     const contributingSource =
       [...lowerSources].reverse().find((source) => {
         const server =
           effectiveClientServer(source, name) ?? source.legacyServers[name];
-        return (
-          isObject(server) &&
-          (Object.hasOwn(server, "command") || Object.hasOwn(server, "url"))
-        );
+        return hasLauncher(server);
       }) ?? lowerSources.at(-1);
     const contributingPath =
       contributingSource?.sourcePath ?? lowerPaths.at(-1)!;
