@@ -520,17 +520,6 @@ export const readEffectiveClientRegistrationConfiguration = async (
     if (projectPath !== undefined) {
       const projectDoc = piProjectFile?.ok ? piProjectFile.value : undefined;
       if (projectDoc !== undefined) {
-        const fragmentEnv = clientRegistrationEnvironment(
-          projectDoc,
-          {},
-          "fragment",
-          platform,
-        );
-        if (!fragmentEnv.ok)
-          return err(
-            invalidEnvironment(projectPath, fragmentEnv.error, "project"),
-          );
-
         const rawProjectRea = effectiveClientServer(
           projectDoc,
           PRODUCT_IDENTITY.mcpServerKey,

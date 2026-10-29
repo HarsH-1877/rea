@@ -954,7 +954,11 @@ const unownedLowerLayerFallback = async (
   client: SetupClient,
   fileSystem: UninstallFileSystem,
 ): Promise<string | undefined> => {
-  const allPaths = uninstallConfigPaths(client);
+  if (client.format !== "opencode" && client.format !== "pi") return undefined;
+  const allPaths = [
+    ...(client.configPaths ?? [client.configPath]),
+    ...(client.projectConfigPaths ?? []),
+  ];
   const currentIndex = allPaths.indexOf(client.configPath);
   if (currentIndex <= 0) return undefined;
   const lowerPaths = allPaths.slice(0, currentIndex);

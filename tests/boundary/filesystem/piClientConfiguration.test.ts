@@ -518,6 +518,52 @@ describe("Pi project-scoped partial overrides", () => {
     expect(piStatus?.remediation).not.toContain("Run rea setup");
   });
 
+  it("ignores unused environment fields in partial project overrides when user registration is valid", async () => {
+    const { home, client } = await piClient();
+    const projectDir = await createTestTempDirectory("rea-pi-project-cwd-");
+    vi.spyOn(process, "cwd").mockReturnValue(projectDir);
+    await trustPiProject(home, projectDir);
+
+    await writeFile(
+      client.configPath,
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            command: command[0],
+            args: command.slice(1),
+            enabled: true,
+          },
+        },
+      }),
+    );
+
+    const projectConfigDir = join(projectDir, ".pi");
+    await mkdir(projectConfigDir, { recursive: true });
+    const projectConfigPath = resolve(projectConfigDir, "mcp.json");
+    await writeFile(
+      projectConfigPath,
+      JSON.stringify({
+        mcpServers: {
+          rea: {
+            enabled: true,
+            env: { REA_GHIDRA_STARTUP_TIMEOUT_MS: "invalid-number" },
+          },
+        },
+      }),
+    );
+
+    const statuses = await readClientRegistrationStatuses(home, undefined, {
+      environment: {},
+    });
+    const piStatus = statuses.find(({ client }) => client === "pi");
+    expect(piStatus).toMatchObject({
+      client: "pi",
+      state: "aligned",
+      scope: "project",
+      config_path: projectConfigPath,
+    });
+  });
+
   it("reports invalid with project-scoped remediation for a standalone partial override without a user registration", async () => {
     const home = await createTestTempDirectory("rea-pi-project-home-");
     const projectDir = await createTestTempDirectory("rea-pi-project-cwd-");
